@@ -780,6 +780,7 @@ body,
   cursor: grab;
   opacity: 0.4;
   user-select: none;
+  touch-action: none;
 }
 
 .kanban-card:hover .kanban-card-handle {
@@ -788,6 +789,33 @@ body,
 
 .kanban-card-handle:active {
   cursor: grabbing;
+}
+
+.kanban-board.dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+
+.kanban-cards.drop-end {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+.kanban-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.85rem;
+  max-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  opacity: 0.95;
 }
 
 .kanban-card.dragging {
