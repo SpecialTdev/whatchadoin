@@ -577,6 +577,76 @@ body,
   font-weight: 600;
 }
 
+/* ---------- workspace split (note + kanban) ---------- */
+.workspace-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.workspace-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 아웃포커스: 흐리게 + 오버레이가 클릭을 가로채 인터랙션 차단 */
+.workspace-pane.inactive {
+  opacity: 0.45;
+}
+
+.pane-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.note-pane .markdown-editor {
+  flex: 1;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.split-divider {
+  flex: 0 0 auto;
+  height: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: row-resize;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  touch-action: none;
+}
+
+.split-divider:hover {
+  background: var(--accent-soft);
+}
+
+.split-grip {
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.split-divider:hover .split-grip {
+  background: var(--accent);
+}
+
 /* ---------- kanban board ---------- */
 .kanban-wrap {
   flex: 1;
@@ -586,10 +656,13 @@ body,
 }
 
 .kanban-board-title {
-  margin: 0 0 0.5rem;
-  font-size: 0.8rem;
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
   font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
 }
 
 .kanban-board {
@@ -598,8 +671,6 @@ body,
   align-items: stretch;
   overflow-x: auto;
   min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
   background: var(--surface);
 }
 
@@ -691,13 +762,31 @@ body,
 .kanban-card {
   display: flex;
   align-items: center;
-  padding: 0.45rem 0.65rem;
+  padding: 0.4rem 0.6rem 0.4rem 0;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  cursor: grab;
 }
 
-.kanban-card:active {
+.kanban-card-handle {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: grab;
+  opacity: 0.4;
+  user-select: none;
+}
+
+.kanban-card:hover .kanban-card-handle {
+  opacity: 0.8;
+}
+
+.kanban-card-handle:active {
   cursor: grabbing;
 }
 

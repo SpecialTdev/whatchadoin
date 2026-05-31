@@ -13,6 +13,8 @@ interface Props {
   /** source of truth: markdown todo note */
   markdown: string;
   onChange: (markdown: string) => void;
+  /** false면 패널이 비활성(아웃포커스) — 드래그 시작을 막는다 */
+  active: boolean;
 }
 
 interface DropTarget {
@@ -20,15 +22,14 @@ interface DropTarget {
   beforeCardId: string | null;
 }
 
-function KanbanBoard({ markdown, onChange }: Props) {
+function KanbanBoard({ markdown, onChange, active }: Props) {
   const [board, setBoard] = useState<Board>(() => parseMarkdown(markdown));
 
-  // 우리가 직접 직렬화해 내보낸 마크다운인지 추적해, 외부(note 모드) 편집만 re-parse.
+  // 우리가 직접 직렬화해 내보낸 마크다운인지 추적해, 외부(note) 편집만 re-parse.
   const lastSerialized = useRef<string>(markdown);
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [justAddedId, setJustAddedId] = useState<string | null>(null);
 
   const draggedRef = useRef<{ cardId: string; fromColId: string } | null>(null);
@@ -75,7 +76,6 @@ function KanbanBoard({ markdown, onChange }: Props) {
   function addCard(colId: string) {
     const card = newCard();
     setJustAddedId(card.id);
-    setEditingId(card.id);
     mapCardsIn(colId, (cards) => [...cards, card]);
   }
 
@@ -122,6 +122,7 @@ function KanbanBoard({ markdown, onChange }: Props) {
 
   // ----- drag & drop -----
   function onDragStart(cardId: string, fromColId: string) {
+    if (!active) return;
     draggedRef.current = { cardId, fromColId };
     setDraggingId(cardId);
   }
@@ -130,6 +131,20 @@ function KanbanBoard({ markdown, onChange }: Props) {
     draggedRef.current = null;
     setDraggingId(null);
     setDropTarget(null);
+  }
+
+  function setCardDropTarget(colId: string, cardId: string) {
+    setDropTarget((prev) =>
+      prev && prev.colId === colId && prev.beforeCardId === cardId
+        ? prev
+        : { colId, beforeCardId: cardId },
+    );
+  }
+
+  function setColumnDropTarget(colId: string) {
+    setDropTarget((prev) =>
+      prev && prev.colId === colId ? prev : { colId, beforeCardId: null },
+    );
   }
 
   function onDropInColumn(colId: string) {
@@ -149,120 +164,159 @@ function KanbanBoard({ markdown, onChange }: Props) {
       {boardTitle && <p className="kanban-board-title">{boardTitle}</p>}
 
       <div className="kanban-board">
-        {board.columns.map((col) => {
-          const isDragOverCol = dropTarget?.colId === col.id;
-          return (
-            <section
-              key={col.id}
-              className={`kanban-column${isDragOverCol ? " drag-over" : ""}`}
-              onDragOver={(e) => {
-                e.preventDefault();
-                if (!dropTarget || dropTarget.colId !== col.id) {
-                  setDropTarget({ colId: col.id, beforeCardId: null });
-                }
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                onDropInColumn(col.id);
-              }}
-            >
-              <header className="kanban-col-header">
-                <input
-                  className="kanban-col-title"
-                  value={col.title}
-                  placeholder="컬럼 이름"
-                  onChange={(e) => setColumnTitle(col.id, e.target.value)}
-                />
-                <span className="kanban-col-count">{col.cards.length}</span>
-                <button
-                  className="kanban-col-delete"
-                  title="컬럼 삭제"
-                  onClick={() => deleteColumn(col.id)}
-                >
-                  ×
-                </button>
-              </header>
-
-              {col.note && <p className="kanban-col-note">{col.note}</p>}
-
-              <ul className="kanban-cards">
-                {col.cards.map((card) => {
-                  const isDropBefore =
-                    dropTarget?.colId === col.id &&
-                    dropTarget.beforeCardId === card.id;
-                  return (
-                    <li
-                      key={card.id}
-                      className={
-                        "kanban-card" +
-                        (card.done ? " done" : "") +
-                        (draggingId === card.id ? " dragging" : "") +
-                        (isDropBefore ? " drop-before" : "")
-                      }
-                      draggable={editingId !== card.id}
-                      onDragStart={() => onDragStart(card.id, col.id)}
-                      onDragEnd={onDragEnd}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (
-                          !dropTarget ||
-                          dropTarget.colId !== col.id ||
-                          dropTarget.beforeCardId !== card.id
-                        ) {
-                          setDropTarget({ colId: col.id, beforeCardId: card.id });
-                        }
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        className="kanban-card-check"
-                        checked={card.done}
-                        onChange={() => toggleCard(col.id, card.id)}
-                      />
-                      <input
-                        className="kanban-card-text"
-                        value={card.text}
-                        placeholder="할 일 입력…"
-                        autoFocus={card.id === justAddedId}
-                        onFocus={() => setEditingId(card.id)}
-                        onBlur={() => {
-                          setEditingId(null);
-                          setJustAddedId(null);
-                        }}
-                        onChange={(e) => setCardText(col.id, card.id, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            e.currentTarget.blur();
-                            addCard(col.id);
-                          }
-                        }}
-                      />
-                      <button
-                        className="kanban-card-delete"
-                        title="카드 삭제"
-                        onClick={() => deleteCard(col.id, card.id)}
-                      >
-                        ×
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-
-              <button className="kanban-add-card" onClick={() => addCard(col.id)}>
-                + 카드 추가
+        {board.columns.map((col) => (
+          <section
+            key={col.id}
+            className={`kanban-column${dropTarget?.colId === col.id ? " drag-over" : ""}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setColumnDropTarget(col.id);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              onDropInColumn(col.id);
+            }}
+          >
+            <header className="kanban-col-header">
+              <input
+                className="kanban-col-title"
+                value={col.title}
+                placeholder="컬럼 이름"
+                onChange={(e) => setColumnTitle(col.id, e.target.value)}
+              />
+              <span className="kanban-col-count">{col.cards.length}</span>
+              <button
+                className="kanban-col-delete"
+                title="컬럼 삭제"
+                onClick={() => deleteColumn(col.id)}
+              >
+                ×
               </button>
-            </section>
-          );
-        })}
+            </header>
+
+            {col.note && <p className="kanban-col-note">{col.note}</p>}
+
+            <ul className="kanban-cards">
+              {col.cards.map((card) => (
+                <KanbanCardItem
+                  key={card.id}
+                  card={card}
+                  isDragging={draggingId === card.id}
+                  isDropBefore={
+                    dropTarget?.colId === col.id &&
+                    dropTarget.beforeCardId === card.id
+                  }
+                  autoFocus={card.id === justAddedId}
+                  onToggle={() => toggleCard(col.id, card.id)}
+                  onTextChange={(t) => setCardText(col.id, card.id, t)}
+                  onDelete={() => deleteCard(col.id, card.id)}
+                  onEnter={() => addCard(col.id)}
+                  onFocusText={() => setJustAddedId(null)}
+                  onDragStart={() => onDragStart(card.id, col.id)}
+                  onDragEnd={onDragEnd}
+                  onDragOverCard={() => setCardDropTarget(col.id, card.id)}
+                />
+              ))}
+            </ul>
+
+            <button className="kanban-add-card" onClick={() => addCard(col.id)}>
+              + 카드 추가
+            </button>
+          </section>
+        ))}
 
         <button className="kanban-add-column" onClick={addColumn}>
           + 컬럼
         </button>
       </div>
     </section>
+  );
+}
+
+interface CardItemProps {
+  card: KanbanCard;
+  isDragging: boolean;
+  isDropBefore: boolean;
+  autoFocus: boolean;
+  onToggle: () => void;
+  onTextChange: (text: string) => void;
+  onDelete: () => void;
+  onEnter: () => void;
+  onFocusText: () => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDragOverCard: () => void;
+}
+
+function KanbanCardItem({
+  card,
+  isDragging,
+  isDropBefore,
+  autoFocus,
+  onToggle,
+  onTextChange,
+  onDelete,
+  onEnter,
+  onFocusText,
+  onDragStart,
+  onDragEnd,
+  onDragOverCard,
+}: CardItemProps) {
+  const cardRef = useRef<HTMLLIElement>(null);
+
+  return (
+    <li
+      ref={cardRef}
+      className={
+        "kanban-card" +
+        (card.done ? " done" : "") +
+        (isDragging ? " dragging" : "") +
+        (isDropBefore ? " drop-before" : "")
+      }
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDragOverCard();
+      }}
+    >
+      <span
+        className="kanban-card-handle"
+        draggable
+        title="드래그해 이동"
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = "move";
+          if (cardRef.current) e.dataTransfer.setDragImage(cardRef.current, 12, 12);
+          onDragStart();
+        }}
+        onDragEnd={onDragEnd}
+      >
+        ⠿
+      </span>
+      <input
+        type="checkbox"
+        className="kanban-card-check"
+        checked={card.done}
+        onChange={onToggle}
+      />
+      <input
+        className="kanban-card-text"
+        value={card.text}
+        placeholder="할 일 입력…"
+        autoFocus={autoFocus}
+        onFocus={onFocusText}
+        onChange={(e) => onTextChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+            onEnter();
+          }
+        }}
+      />
+      <button className="kanban-card-delete" title="카드 삭제" onClick={onDelete}>
+        ×
+      </button>
+    </li>
   );
 }
 
