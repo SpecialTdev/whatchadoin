@@ -1,20 +1,6 @@
 import { useRef, useState } from "react";
 import KanbanBoard from "./KanbanBoard";
 
-const SAMPLE_NOTE = `# 오늘의 작업
-
-## 진행 중
-- [ ] 칸반 리포트 레이아웃 구현
-- [ ] tracking 이벤트 스키마 정의
-
-## 완료
-- [x] Tauri 개발 환경 셋업
-- [x] mockup 브랜치 생성
-
-## 메모
-화면만 띄워두지 말고 실제로 밀도있게...
-`;
-
 type Focus = "note" | "kanban";
 
 const MIN_RATIO = 15;
@@ -22,13 +8,14 @@ const MAX_RATIO = 85;
 const clampRatio = (r: number) => Math.min(MAX_RATIO, Math.max(MIN_RATIO, r));
 
 interface Props {
+  // note(markdown) = single source of truth (App이 소유). note/kanban 양쪽이 공유 편집한다.
+  note: string;
+  onNoteChange: (note: string) => void;
   tasks: string[];
   activeTask: string | null;
 }
 
-function WorkView({ tasks, activeTask }: Props) {
-  // note(markdown) = single source of truth. note/kanban 양쪽이 이를 공유 편집한다.
-  const [note, setNote] = useState(SAMPLE_NOTE);
+function WorkView({ note, onNoteChange, tasks, activeTask }: Props) {
   const [focus, setFocus] = useState<Focus>("note");
   const [topRatio, setTopRatio] = useState(50); // Note 패널 높이 %
 
@@ -111,7 +98,7 @@ function WorkView({ tasks, activeTask }: Props) {
             value={note}
             readOnly={!noteActive}
             onFocus={() => setFocus("note")}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e) => onNoteChange(e.target.value)}
             spellCheck={false}
           />
           {!noteActive && (
@@ -139,7 +126,7 @@ function WorkView({ tasks, activeTask }: Props) {
         >
           <KanbanBoard
             markdown={note}
-            onChange={setNote}
+            onChange={onNoteChange}
             active={kanbanActive}
           />
           {!kanbanActive && (
