@@ -538,6 +538,235 @@ body,
   opacity: 0.85;
 }
 
+/* ---------- workspace mode switch ---------- */
+.editor-toolbar-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ws-mode-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.ws-mode-switch button {
+  border: none;
+  background: var(--surface);
+  color: var(--text-muted);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.ws-mode-switch button + button {
+  border-left: 1px solid var(--border);
+}
+
+.ws-mode-switch button:hover {
+  color: var(--accent);
+}
+
+.ws-mode-switch button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- kanban board ---------- */
+.kanban-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.kanban-board-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.kanban-board {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.kanban-column {
+  flex: 1 0 220px;
+  min-width: 200px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+
+.kanban-column.drag-over {
+  background: var(--accent-soft);
+}
+
+.kanban-col-header {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.kanban-col-title {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  outline: none;
+}
+
+.kanban-col-count {
+  padding: 0 0.4rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.kanban-col-delete,
+.kanban-card-delete {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+
+.kanban-col-header:hover .kanban-col-delete,
+.kanban-card:hover .kanban-card-delete {
+  opacity: 0.7;
+}
+
+.kanban-col-delete:hover,
+.kanban-card-delete:hover {
+  opacity: 1;
+  color: #e74c3c;
+}
+
+.kanban-col-note {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.76rem;
+  font-style: italic;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kanban-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 1.5rem;
+}
+
+.kanban-card {
+  display: flex;
+  align-items: center;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  cursor: grab;
+}
+
+.kanban-card:active {
+  cursor: grabbing;
+}
+
+.kanban-card.dragging {
+  opacity: 0.4;
+}
+
+.kanban-card.drop-before {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+.kanban-card-check {
+  flex: 0 0 auto;
+  margin: 0 0.5rem 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.kanban-card-text {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.kanban-card.done .kanban-card-text {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.kanban-add-card {
+  border: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+
+.kanban-add-card:hover {
+  color: var(--accent);
+}
+
+.kanban-add-column {
+  flex: 0 0 auto;
+  align-self: stretch;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  padding: 0 1rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.12s, background 0.12s;
+}
+
+.kanban-add-column:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 /* ---------- dark theme ---------- */
 @media (prefers-color-scheme: dark) {
   :root {

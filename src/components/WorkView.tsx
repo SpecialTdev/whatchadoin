@@ -1,4 +1,5 @@
 import { useState } from "react";
+import KanbanBoard from "./KanbanBoard";
 
 const SAMPLE_NOTE = `# 오늘의 작업
 
@@ -14,18 +15,38 @@ const SAMPLE_NOTE = `# 오늘의 작업
 화면만 띄워두지 말고 실제로 밀도있게...
 `;
 
+type Mode = "note" | "kanban";
+
 interface Props {
   tasks: string[];
   activeTask: string | null;
 }
 
 function WorkView({ tasks, activeTask }: Props) {
+  // note(markdown) = single source of truth. kanban은 이를 파싱/직렬화해 편집한다.
   const [note, setNote] = useState(SAMPLE_NOTE);
+  const [mode, setMode] = useState<Mode>("note");
 
   return (
     <div className="work-view">
       <div className="editor-toolbar">
-        <span className="editor-title">Note</span>
+        <div className="editor-toolbar-left">
+          <span className="editor-title">Workspace</span>
+          <nav className="ws-mode-switch" aria-label="편집 모드">
+            <button
+              className={mode === "note" ? "active" : ""}
+              onClick={() => setMode("note")}
+            >
+              Note
+            </button>
+            <button
+              className={mode === "kanban" ? "active" : ""}
+              onClick={() => setMode("kanban")}
+            >
+              Kanban
+            </button>
+          </nav>
+        </div>
         <span className="tracking-status">
           <span className="tracking-dot" />
           15s마다 변경 추적 중
@@ -45,15 +66,23 @@ function WorkView({ tasks, activeTask }: Props) {
         </div>
       )}
 
-      <textarea
-        className="markdown-editor"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        spellCheck={false}
-      />
+      {mode === "note" ? (
+        <textarea
+          className="markdown-editor"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          spellCheck={false}
+        />
+      ) : (
+        <KanbanBoard markdown={note} onChange={setNote} />
+      )}
 
       <div className="editor-footer">
-        <span className="hint">WYSIWYG markdown editor (mockup)</span>
+        <span className="hint">
+          {mode === "note"
+            ? "WYSIWYG markdown editor — ## 제목은 컬럼, - [ ] 항목은 카드가 됩니다."
+            : "카드를 드래그해 컬럼 간 이동 · 변경사항은 Note와 자동 동기화됩니다."}
+        </span>
       </div>
     </div>
   );
