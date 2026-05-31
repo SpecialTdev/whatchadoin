@@ -72,6 +72,28 @@ fn submit_checkin(app: AppHandle, task: String) {
     println!("[Rust] emit_to result: {:?}", result);
 }
 
+// 체크인 대신 메인 창에서 직접 입력: 메인 창을 띄워 포커스하고, Work view를
+// 활성화하라는 이벤트를 보낸 뒤 체크인 창을 숨긴다.
+#[tauri::command]
+fn direct_input(app: AppHandle) {
+    println!("[Rust] direct_input called");
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+    let _ = app.emit_to(
+        EventTarget::WebviewWindow {
+            label: "main".to_string(),
+        },
+        "checkin://direct",
+        (),
+    );
+    if let Some(checkin) = app.get_webview_window("checkin") {
+        let _ = checkin.hide();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 조립기(tauri-main): 처리 엔진을 생성해 app-service에 주입한다.
@@ -87,7 +109,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_checkin,
             get_checkin_data,
-            submit_checkin
+            submit_checkin,
+            direct_input
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

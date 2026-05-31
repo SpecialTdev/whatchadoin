@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import KanbanBoard from "./KanbanBoard";
 
 type Focus = "note" | "kanban";
@@ -13,9 +13,11 @@ interface Props {
   onNoteChange: (note: string) => void;
   tasks: string[];
   activeTask: string | null;
+  /** 값이 바뀌면(체크인 '직접 입력' 등) Note 패널을 활성화하고 포커스한다 */
+  focusSignal?: number;
 }
 
-function WorkView({ note, onNoteChange, tasks, activeTask }: Props) {
+function WorkView({ note, onNoteChange, tasks, activeTask, focusSignal }: Props) {
   const [focus, setFocus] = useState<Focus>("note");
   const [topRatio, setTopRatio] = useState(50); // Note 패널 높이 %
 
@@ -29,6 +31,14 @@ function WorkView({ note, onNoteChange, tasks, activeTask }: Props) {
     setFocus("note");
     textareaRef.current?.focus();
   }
+
+  // 외부 신호(체크인 '직접 입력')로 Note 활성화
+  useEffect(() => {
+    if (focusSignal && focusSignal > 0) {
+      setFocus("note");
+      textareaRef.current?.focus();
+    }
+  }, [focusSignal]);
 
   function onDividerPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault();

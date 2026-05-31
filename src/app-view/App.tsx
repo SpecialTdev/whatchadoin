@@ -57,6 +57,8 @@ function App() {
   const [selectedDate, setSelectedDate] = useState<string>(SAMPLE_DATES[0]);
   const [note, setNote] = useState<string>(SAMPLE_NOTE);
   const [activeTask, setActiveTask] = useState<string | null>(null);
+  // 체크인의 '직접 입력' → Work view 활성화 신호 (값이 바뀌면 노트 에디터 포커스)
+  const [noteFocusNonce, setNoteFocusNonce] = useState(0);
 
   // 체크인 후보 = 노트의 실제 todo 항목
   const tasks = useMemo(() => deriveTasks(note), [note]);
@@ -76,25 +78,34 @@ function App() {
     setNote((prev) => (deriveTasks(prev).includes(task) ? prev : appendTask(prev, task)));
   }, []);
 
-  // Listen for submit result emitted by Rust
+  // Listen for events emitted by Rust (submit / direct-input)
   useEffect(() => {
     let cancelled = false;
-    let unlistenSubmit: (() => void) | null = null;
+    const unlisteners: Array<() => void> = [];
 
     async function setup() {
       try {
         const { listen } = await import("@tauri-apps/api/event");
-        console.log("[App] registering listen(checkin://submit)");
-        const unlisten = await listen<string>("checkin://submit", (event) => {
-          console.log("[App] received checkin://submit, payload:", event.payload);
-          handleCheckInSubmit(event.payload);
-        });
-        if (cancelled) {
-          unlisten();
-        } else {
-          unlistenSubmit = unlisten;
-          console.log("[App] listen(checkin://submit) registered");
-        }
+
+        const register = (un: () => void) => {
+          if (cancelled) un();
+          else unlisteners.push(un);
+        };
+
+        register(
+          await listen<string>("checkin://submit", (event) => {
+            console.log("[App] received checkin://submit, payload:", event.payload);
+            handleCheckInSubmit(event.payload);
+          }),
+        );
+
+        register(
+          await listen("checkin://direct", () => {
+            console.log("[App] received checkin://direct → Work view 활성화");
+            setTab("work");
+            setNoteFocusNonce((n) => n + 1);
+          }),
+        );
       } catch (e) {
         console.error("[App] listen setup failed:", e);
       }
@@ -103,7 +114,7 @@ function App() {
     setup();
     return () => {
       cancelled = true;
-      unlistenSubmit?.();
+      unlisteners.forEach((un) => un());
     };
   }, [handleCheckInSubmit]);
 
@@ -144,6 +155,7 @@ function App() {
             onNoteChange={setNote}
             tasks={tasks}
             activeTask={activeTask}
+            focusSignal={noteFocusNonce}
           />
         ) : (
           <ReportView date={selectedDate} />

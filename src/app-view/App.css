@@ -538,6 +538,21 @@ body,
   opacity: 0.85;
 }
 
+.checkin-direct-btn {
+  border: none;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.6rem 0 0;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+
+.checkin-direct-btn:hover {
+  color: var(--accent);
+}
+
 /* ---------- workspace mode switch ---------- */
 .editor-toolbar-left {
   display: inline-flex;

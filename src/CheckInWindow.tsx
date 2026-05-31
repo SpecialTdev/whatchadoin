@@ -41,6 +41,16 @@ function CheckInWindow() {
     await getCurrentWindow().hide();
   }
 
+  async function handleDirectInput() {
+    // 메인 창을 띄워 Work view를 활성화 (창 포커스/숨김은 Rust가 처리)
+    console.log("[CheckInWindow] invoking direct_input");
+    try {
+      await invoke("direct_input");
+    } catch (e) {
+      console.error("[CheckInWindow] direct_input error:", e);
+    }
+  }
+
   if (!data) {
     return <div className="checkin-loading">로딩 중...</div>;
   }
@@ -102,6 +112,10 @@ function CheckInWindow() {
           제출
         </button>
       </div>
+
+      <button className="checkin-direct-btn" onClick={handleDirectInput}>
+        ✎ Work에서 직접 입력하기
+      </button>
     </div>
   );
 }
