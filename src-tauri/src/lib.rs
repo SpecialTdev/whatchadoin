@@ -1,5 +1,7 @@
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, EventTarget, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, EventTarget, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 
 #[derive(Default)]
 struct CheckInState {
@@ -11,6 +13,28 @@ struct CheckInState {
 struct CheckInData {
     tasks: Vec<String>,
     active_task: Option<String>,
+}
+
+// 체크인 창을 숨긴 채로 미리 생성한다. 닫기(X)를 눌러도 destroy되지 않고 hide만 하도록
+// CloseRequested 이벤트를 가로채 둔다 — 이후 open_checkin이 이 창을 재사용해 show만 한다.
+fn build_checkin_window(app: &AppHandle) -> tauri::Result<()> {
+    let win = WebviewWindowBuilder::new(app, "checkin", WebviewUrl::App(Default::default()))
+        .title("지금 뭐 하고 있어?")
+        .inner_size(360.0, 400.0)
+        .center()
+        .always_on_top(true)
+        .resizable(false)
+        .visible(false)
+        .build()?;
+
+    let win_for_close = win.clone();
+    win.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = win_for_close.hide();
+        }
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -27,26 +51,28 @@ fn open_checkin(
         s.active_task = active_task;
     }
 
-    if let Some(win) = app.get_webview_window("checkin") {
-        println!("[Rust] checkin window exists, showing");
-        let _ = win.show();
-        let _ = win.set_focus();
-    } else {
-        println!("[Rust] creating new checkin window");
-        match WebviewWindowBuilder::new(&app, "checkin", WebviewUrl::App(Default::default()))
-            .title("지금 뭐 하고 있어?")
-            .inner_size(360.0, 400.0)
-            .center()
-            .always_on_top(true)
-            .resizable(false)
-            .build()
-        {
-            Ok(_) => {
-                println!("[Rust] checkin window created");
-            }
-            Err(e) => println!("[Rust] failed to create checkin window: {}", e),
+    // 미리 만들어 둔 창이 없을 경우의 안전장치
+    if app.get_webview_window("checkin").is_none() {
+        println!("[Rust] checkin window missing, building on demand");
+        if let Err(e) = build_checkin_window(&app) {
+            println!("[Rust] failed to build checkin window: {}", e);
         }
     }
+
+    if let Some(win) = app.get_webview_window("checkin") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+
+    // 이미 로드된 웹뷰가 최신 데이터를 다시 가져오게 한다 (stale 방지)
+    let _ = app.emit_to(
+        EventTarget::WebviewWindow {
+            label: "checkin".to_string(),
+        },
+        "checkin://refresh",
+        (),
+    );
 }
 
 #[tauri::command]
@@ -106,6 +132,13 @@ pub fn run() {
     tauri::Builder::default()
         .manage(Mutex::new(CheckInState::default()))
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            // 체크인 창을 시작 시 숨긴 채로 미리 만들어 둔다 (open 시 즉시 show만 하도록).
+            if let Err(e) = build_checkin_window(app.handle()) {
+                println!("[Rust] failed to pre-build checkin window: {}", e);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_checkin,
             get_checkin_data,

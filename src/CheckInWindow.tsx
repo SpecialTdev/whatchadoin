@@ -16,15 +16,45 @@ function CheckInWindow() {
   const [showNewTaskInput, setShowNewTaskInput] = useState(false);
 
   useEffect(() => {
-    console.log("[CheckInWindow] mounted, calling get_checkin_data");
-    invoke<CheckInData>("get_checkin_data")
-      .then((d) => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    async function loadData() {
+      console.log("[CheckInWindow] loading get_checkin_data");
+      try {
+        const d = await invoke<CheckInData>("get_checkin_data");
+        if (cancelled) return;
         console.log("[CheckInWindow] get_checkin_data returned:", d);
         setData(d);
         setSelected(d.active_task ?? "");
+        setNewTask("");
         setShowNewTaskInput(d.active_task === null);
-      })
-      .catch((e) => console.error("[CheckInWindow] get_checkin_data error:", e));
+      } catch (e) {
+        console.error("[CheckInWindow] get_checkin_data error:", e);
+      }
+    }
+
+    loadData();
+
+    // 숨겼다가 다시 보여줄 때 Rust가 보내는 refresh 이벤트로 최신 데이터를 다시 가져온다.
+    (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const un = await listen("checkin://refresh", () => {
+          console.log("[CheckInWindow] received checkin://refresh");
+          loadData();
+        });
+        if (cancelled) un();
+        else unlisten = un;
+      } catch (e) {
+        console.error("[CheckInWindow] refresh listen failed:", e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   async function handleSubmit() {

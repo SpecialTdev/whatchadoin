@@ -11,7 +11,8 @@ html,
   flex-direction: column;
   gap: 0.875rem;
   background: var(--surface);
-  min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
 }
 
 .checkin-loading {
