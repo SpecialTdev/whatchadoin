@@ -1,4 +1,4 @@
-import type { Tab } from "../App";
+import type { Tab } from "../app-view/App";
 
 interface Props {
   tab: Tab;

@@ -48,6 +48,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "app-service"
+version = "0.1.0"
+dependencies = [
+ "core-shared",
+]
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -466,6 +473,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "collection"
+version = "0.1.0"
+dependencies = [
+ "core-shared",
+]
+
+[[package]]
 name = "combine"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -532,6 +546,13 @@ dependencies = [
  "bitflags 2.11.1",
  "core-foundation",
  "libc",
+]
+
+[[package]]
+name = "core-shared"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -2613,6 +2634,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "processing"
+version = "0.1.0"
+dependencies = [
+ "core-shared",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.39.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4340,6 +4368,10 @@ dependencies = [
 name = "whatchadoin"
 version = "0.1.0"
 dependencies = [
+ "app-service",
+ "collection",
+ "core-shared",
+ "processing",
  "serde",
  "serde_json",
  "tauri",
