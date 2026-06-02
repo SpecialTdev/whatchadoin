@@ -3,13 +3,32 @@ import LeftSidebar from "../components/LeftSidebar";
 import RightSidebar from "../components/RightSidebar";
 import WorkView from "../components/WorkView";
 import ReportView from "../components/ReportView";
+import SettingsView from "../components/SettingsView";
 import { parseMarkdown, serializeBoard, newCard, newColumn } from "../lib/kanban";
 import "./App.css";
 
-export type Tab = "work" | "report";
+export type Tab = "work" | "report" | "settings";
 
 const SAMPLE_DATES = ["2026-05-29", "2026-05-28", "2026-05-27"];
-const CHECK_IN_INTERVAL_MS = 60_000;
+
+// 체크인 팝업 주기 (초 단위): 1분~30분, 10초 단위
+const MIN_SEC = 60;
+const MAX_SEC = 1800;
+const DEFAULT_SEC = 60;
+const STORAGE_KEY = "checkin.intervalSec";
+
+// localStorage에서 저장된 주기를 읽어 [MIN_SEC, MAX_SEC]로 clamp, 없으면 기본값.
+function loadIntervalSec(): number {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw == null) return DEFAULT_SEC;
+    const sec = Number(raw);
+    if (!Number.isFinite(sec)) return DEFAULT_SEC;
+    return Math.min(MAX_SEC, Math.max(MIN_SEC, Math.round(sec)));
+  } catch {
+    return DEFAULT_SEC;
+  }
+}
 
 const SAMPLE_NOTE = `# 오늘의 작업
 
@@ -59,6 +78,17 @@ function App() {
   const [activeTask, setActiveTask] = useState<string | null>(null);
   // 체크인의 '직접 입력' → Work view 활성화 신호 (값이 바뀌면 노트 에디터 포커스)
   const [noteFocusNonce, setNoteFocusNonce] = useState(0);
+  // 체크인 팝업 주기(초). 슬라이더로 조절, localStorage에 유지.
+  const [intervalSec, setIntervalSec] = useState<number>(() => loadIntervalSec());
+
+  const handleIntervalChange = useCallback((sec: number) => {
+    setIntervalSec(sec);
+    try {
+      localStorage.setItem(STORAGE_KEY, String(sec));
+    } catch {
+      // 저장 실패는 무시 (세션 한정으로 동작)
+    }
+  }, []);
 
   // 체크인 후보 = 노트의 실제 todo 항목
   const tasks = useMemo(() => deriveTasks(note), [note]);
@@ -132,11 +162,11 @@ function App() {
     }
   }, []);
 
-  // Timer: open/show checkin window
+  // Timer: open/show checkin window. 주기가 바뀌면 기존 인터벌 정리 후 재설정.
   useEffect(() => {
-    const id = setInterval(openCheckIn, CHECK_IN_INTERVAL_MS);
+    const id = setInterval(openCheckIn, intervalSec * 1000);
     return () => clearInterval(id);
-  }, [openCheckIn]);
+  }, [openCheckIn, intervalSec]);
 
   return (
     <div className="layout">
@@ -157,8 +187,15 @@ function App() {
             activeTask={activeTask}
             focusSignal={noteFocusNonce}
           />
-        ) : (
+        ) : tab === "report" ? (
           <ReportView date={selectedDate} />
+        ) : (
+          <SettingsView
+            intervalSec={intervalSec}
+            minSec={MIN_SEC}
+            maxSec={MAX_SEC}
+            onIntervalChange={handleIntervalChange}
+          />
         )}
       </main>
 

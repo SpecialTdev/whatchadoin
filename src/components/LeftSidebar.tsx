@@ -54,6 +54,15 @@ function LeftSidebar({
           </ul>
         )}
       </div>
+
+      <div className="left-sidebar-footer">
+        <button
+          className={`settings-btn ${tab === "settings" ? "active" : ""}`}
+          onClick={() => onTabChange("settings")}
+        >
+          <span className="settings-btn-icon">⚙</span> Settings
+        </button>
+      </div>
     </aside>
   );
 }
