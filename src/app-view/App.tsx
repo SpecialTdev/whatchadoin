@@ -5,17 +5,22 @@ import WorkView from "../components/WorkView";
 import ReportView from "../components/ReportView";
 import SettingsView from "../components/SettingsView";
 import { parseMarkdown, serializeBoard, newCard, newColumn } from "../lib/kanban";
+import { fetchEvents, workDayKey, type TrackedEvent } from "../lib/events";
 import "./App.css";
 
 export type Tab = "work" | "report" | "settings";
-
-const SAMPLE_DATES = ["2026-05-29", "2026-05-28", "2026-05-27"];
 
 // 체크인 팝업 주기 (초 단위): 1분~30분, 10초 단위
 const MIN_SEC = 60;
 const MAX_SEC = 1800;
 const DEFAULT_SEC = 60;
 const STORAGE_KEY = "checkin.intervalSec";
+
+// 리포트 하루 경계 시각(시): 자정~오전 11시. 이 시각 전 이벤트는 전날 업무일로 묶인다.
+const MIN_BOUNDARY = 0;
+const MAX_BOUNDARY = 11;
+const DEFAULT_BOUNDARY = 5;
+const BOUNDARY_KEY = "report.dayBoundaryHour";
 
 // localStorage에서 저장된 주기를 읽어 [MIN_SEC, MAX_SEC]로 clamp, 없으면 기본값.
 function loadIntervalSec(): number {
@@ -27,6 +32,19 @@ function loadIntervalSec(): number {
     return Math.min(MAX_SEC, Math.max(MIN_SEC, Math.round(sec)));
   } catch {
     return DEFAULT_SEC;
+  }
+}
+
+// 저장된 하루 경계 시각을 읽어 [MIN_BOUNDARY, MAX_BOUNDARY]로 clamp, 없으면 기본값.
+function loadBoundaryHour(): number {
+  try {
+    const raw = localStorage.getItem(BOUNDARY_KEY);
+    if (raw == null) return DEFAULT_BOUNDARY;
+    const h = Number(raw);
+    if (!Number.isFinite(h)) return DEFAULT_BOUNDARY;
+    return Math.min(MAX_BOUNDARY, Math.max(MIN_BOUNDARY, Math.round(h)));
+  } catch {
+    return DEFAULT_BOUNDARY;
   }
 }
 
@@ -73,13 +91,19 @@ function appendTask(note: string, task: string): string {
 
 function App() {
   const [tab, setTab] = useState<Tab>("work");
-  const [selectedDate, setSelectedDate] = useState<string>(SAMPLE_DATES[0]);
+  const [selectedDate, setSelectedDate] = useState<string>("");
   const [note, setNote] = useState<string>(SAMPLE_NOTE);
   const [activeTask, setActiveTask] = useState<string | null>(null);
   // 체크인의 '직접 입력' → Work view 활성화 신호 (값이 바뀌면 노트 에디터 포커스)
   const [noteFocusNonce, setNoteFocusNonce] = useState(0);
   // 체크인 팝업 주기(초). 슬라이더로 조절, localStorage에 유지.
   const [intervalSec, setIntervalSec] = useState<number>(() => loadIntervalSec());
+  // 리포트 하루 경계 시각(시). 슬라이더로 조절, localStorage에 유지.
+  const [dayBoundaryHour, setDayBoundaryHour] = useState<number>(() =>
+    loadBoundaryHour(),
+  );
+  // 리포트용 이벤트 목록 (report 탭 진입 시 Rust에서 로드).
+  const [reportEvents, setReportEvents] = useState<TrackedEvent[]>([]);
 
   const handleIntervalChange = useCallback((sec: number) => {
     setIntervalSec(sec);
@@ -87,6 +111,15 @@ function App() {
       localStorage.setItem(STORAGE_KEY, String(sec));
     } catch {
       // 저장 실패는 무시 (세션 한정으로 동작)
+    }
+  }, []);
+
+  const handleBoundaryChange = useCallback((hour: number) => {
+    setDayBoundaryHour(hour);
+    try {
+      localStorage.setItem(BOUNDARY_KEY, String(hour));
+    } catch {
+      // 저장 실패는 무시
     }
   }, []);
 
@@ -176,12 +209,48 @@ function App() {
     return () => clearInterval(id);
   }, [openCheckIn, intervalSec]);
 
+  // report 탭 진입 시 이벤트를 로드한다 (리포트는 회고용이라 진입 시 새로고침으로 충분).
+  useEffect(() => {
+    if (tab !== "report") return;
+    let cancelled = false;
+    fetchEvents()
+      .then((evs) => {
+        if (!cancelled) setReportEvents(evs);
+      })
+      .catch((e) => console.error("[App] fetchEvents (report) failed:", e));
+    return () => {
+      cancelled = true;
+    };
+  }, [tab]);
+
+  // 이벤트에서 업무일 목록을 도출 (최신순). 하루 경계 설정을 반영.
+  const reportDates = useMemo(() => {
+    const set = new Set<string>();
+    for (const ev of reportEvents) set.add(workDayKey(ev.ts, dayBoundaryHour));
+    return Array.from(set).sort().reverse();
+  }, [reportEvents, dayBoundaryHour]);
+
+  // 선택 날짜가 목록에 없으면 가장 최근 업무일로 맞춘다.
+  useEffect(() => {
+    if (reportDates.length === 0) return;
+    if (!reportDates.includes(selectedDate)) setSelectedDate(reportDates[0]);
+  }, [reportDates, selectedDate]);
+
+  // 선택한 업무일의 이벤트 (시간 오름차순).
+  const reportDayEvents = useMemo(
+    () =>
+      reportEvents
+        .filter((ev) => workDayKey(ev.ts, dayBoundaryHour) === selectedDate)
+        .sort((a, b) => a.ts - b.ts),
+    [reportEvents, dayBoundaryHour, selectedDate],
+  );
+
   return (
     <div className="layout">
       <LeftSidebar
         tab={tab}
         onTabChange={setTab}
-        dates={SAMPLE_DATES}
+        dates={reportDates}
         selectedDate={selectedDate}
         onSelectDate={setSelectedDate}
       />
@@ -196,13 +265,21 @@ function App() {
             focusSignal={noteFocusNonce}
           />
         ) : tab === "report" ? (
-          <ReportView date={selectedDate} />
+          <ReportView
+            date={selectedDate}
+            events={reportDayEvents}
+            checkinIntervalSec={intervalSec}
+          />
         ) : (
           <SettingsView
             intervalSec={intervalSec}
             minSec={MIN_SEC}
             maxSec={MAX_SEC}
             onIntervalChange={handleIntervalChange}
+            boundaryHour={dayBoundaryHour}
+            minBoundary={MIN_BOUNDARY}
+            maxBoundary={MAX_BOUNDARY}
+            onBoundaryChange={handleBoundaryChange}
           />
         )}
       </main>

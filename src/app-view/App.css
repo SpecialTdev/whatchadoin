@@ -448,12 +448,8 @@ body,
 .gantt-track {
   position: relative;
   height: 100%;
-  /* 시간 단위 세로 격자선 (9구간) */
-  background-image: repeating-linear-gradient(
-    to right,
-    var(--border) 0 1px,
-    transparent 1px calc(100% / 9)
-  );
+  overflow: hidden;
+  /* 세로 격자선은 .gantt-grid 요소로 시간축에 맞춰 직접 그린다 */
 }
 
 /* 시간축 행 */
@@ -483,9 +479,7 @@ body,
   height: 20px;
   min-width: 2px;
   border-radius: 4px;
-  display: flex;
-  align-items: center;
-  padding: 0 0.4rem;
+  padding: 0;
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
 }
@@ -508,6 +502,53 @@ body,
 
 .insights-placeholder p {
   margin: 0 0 0.5rem;
+}
+
+/* ---------- report: gantt extras ---------- */
+.gantt-grid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+.gantt-note-tick {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 3px;
+  height: 14px;
+  border-radius: 1px;
+}
+
+/* ---------- report: insights ---------- */
+.insights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.insight-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.insight-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.insight-value {
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- debug ---------- */

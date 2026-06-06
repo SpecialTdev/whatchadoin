@@ -1,28 +1,12 @@
 // background tracking이 기록한 업무 이벤트 로그 피드.
 // 초기 목록은 get_events로 로드하고, 이후 events://new로 증분 갱신한다.
 import { useEffect, useState } from "react";
-
-type EventKind = "note" | "checkin";
-
-interface TrackedEvent {
-  id: number;
-  ts: number; // unix epoch millis
-  kind: EventKind;
-  text: string;
-}
-
-// 이벤트 종류별 색상 (점). phase 2/3에서 app/web/comm 추가 예정.
-const KIND_COLOR: Record<EventKind, string> = {
-  note: "#2ecc71", // 노트(todo) 변경
-  checkin: "#4f8cff", // 체크인 응답
-};
-
-function formatTime(ts: number): string {
-  const d = new Date(ts);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
-}
+import {
+  KIND_COLOR,
+  fetchEvents,
+  formatTime,
+  type TrackedEvent,
+} from "../lib/events";
 
 function RightSidebar() {
   const [events, setEvents] = useState<TrackedEvent[]>([]);
@@ -33,8 +17,7 @@ function RightSidebar() {
 
     async function setup() {
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const initial = await invoke<TrackedEvent[]>("get_events");
+        const initial = await fetchEvents();
         console.log("[RightSidebar] get_events →", initial.length, "event(s)");
         if (!cancelled) setEvents(initial);
       } catch (e) {

@@ -3,6 +3,10 @@ interface Props {
   minSec: number;
   maxSec: number;
   onIntervalChange: (sec: number) => void;
+  boundaryHour: number;
+  minBoundary: number;
+  maxBoundary: number;
+  onBoundaryChange: (hour: number) => void;
 }
 
 const STEP_SEC = 10;
@@ -14,7 +18,24 @@ function fmtInterval(sec: number): string {
   return s === 0 ? `${m}분` : `${m}분 ${s}초`;
 }
 
-function SettingsView({ intervalSec, minSec, maxSec, onIntervalChange }: Props) {
+// 시(0~23) → "자정 (0시)" / "오전 N시" / "정오 (12시)" / "오후 N시"
+function fmtBoundary(h: number): string {
+  if (h === 0) return "자정 (0시)";
+  if (h < 12) return `오전 ${h}시`;
+  if (h === 12) return "정오 (12시)";
+  return `오후 ${h - 12}시`;
+}
+
+function SettingsView({
+  intervalSec,
+  minSec,
+  maxSec,
+  onIntervalChange,
+  boundaryHour,
+  minBoundary,
+  maxBoundary,
+  onBoundaryChange,
+}: Props) {
   return (
     <div className="settings-view">
       <header className="settings-header">
@@ -39,6 +60,31 @@ function SettingsView({ intervalSec, minSec, maxSec, onIntervalChange }: Props) 
           <div className="settings-range-labels">
             <span>{fmtInterval(minSec)}</span>
             <span>{fmtInterval(maxSec)}</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <h2>하루 경계 시각</h2>
+        <p className="hint">
+          리포트에서 하루를 가르는 기준 시각입니다. 이 시각 전의 작업은 전날로
+          묶입니다 (자정 넘긴 작업 대응).
+        </p>
+
+        <div className="settings-control">
+          <div className="settings-value">{fmtBoundary(boundaryHour)}</div>
+          <input
+            className="settings-range"
+            type="range"
+            min={minBoundary}
+            max={maxBoundary}
+            step={1}
+            value={boundaryHour}
+            onChange={(e) => onBoundaryChange(Number(e.target.value))}
+          />
+          <div className="settings-range-labels">
+            <span>{fmtBoundary(minBoundary)}</span>
+            <span>{fmtBoundary(maxBoundary)}</span>
           </div>
         </div>
       </section>
