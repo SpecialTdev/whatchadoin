@@ -108,6 +108,14 @@ function App() {
     setNote((prev) => (deriveTasks(prev).includes(task) ? prev : appendTask(prev, task)));
   }, []);
 
+  // note 변경을 Rust 수집기에 push한다 (백그라운드 15s diff의 입력). 추적/이벤트
+  // 기록은 Rust collection crate가 담당하고, 여기선 최신 스냅샷만 넘긴다.
+  useEffect(() => {
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke("update_note", { note }))
+      .catch((e) => console.error("[App] update_note failed:", e));
+  }, [note]);
+
   // Listen for events emitted by Rust (submit / direct-input)
   useEffect(() => {
     let cancelled = false;

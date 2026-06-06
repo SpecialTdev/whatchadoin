@@ -1,34 +1,66 @@
-// mockup: background tracking이 감지한 업무 이벤트 로그 피드
+// background tracking이 기록한 업무 이벤트 로그 피드.
+// 초기 목록은 get_events로 로드하고, 이후 events://new로 증분 갱신한다.
+import { useEffect, useState } from "react";
 
-type EventKind = "comm" | "web" | "app" | "note";
+type EventKind = "note" | "checkin";
 
 interface TrackedEvent {
-  time: string; // HH:MM
-  text: string;
+  id: number;
+  ts: number; // unix epoch millis
   kind: EventKind;
+  text: string;
 }
 
-// 이벤트 종류별 색상 (점)
+// 이벤트 종류별 색상 (점). phase 2/3에서 app/web/comm 추가 예정.
 const KIND_COLOR: Record<EventKind, string> = {
-  comm: "#e67e22", // 메신저 등 커뮤니케이션
-  web: "#9b59b6", // 웹/사내 게시판
-  app: "#4f8cff", // 앱 실행/포커스
-  note: "#2ecc71", // 노트 변경
+  note: "#2ecc71", // 노트(todo) 변경
+  checkin: "#4f8cff", // 체크인 응답
 };
 
-// mockup: 샘플 이벤트 (최신순)
-const EVENTS: TrackedEvent[] = [
-  { time: "17:42", text: "메신저 접속함", kind: "comm" },
-  { time: "17:35", text: "노트 수정 — '리포트 정리' 추가", kind: "note" },
-  { time: "17:12", text: "스프레드시트 on", kind: "app" },
-  { time: "16:48", text: "사내 게시판 접속", kind: "web" },
-  { time: "16:20", text: "노트 수정 — 체크박스 완료", kind: "note" },
-  { time: "15:50", text: "VS Code 포커스", kind: "app" },
-  { time: "15:05", text: "메신저 접속함", kind: "comm" },
-  { time: "14:30", text: "사내 게시판 접속", kind: "web" },
-];
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
 
 function RightSidebar() {
+  const [events, setEvents] = useState<TrackedEvent[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    async function setup() {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const initial = await invoke<TrackedEvent[]>("get_events");
+        console.log("[RightSidebar] get_events →", initial.length, "event(s)");
+        if (!cancelled) setEvents(initial);
+      } catch (e) {
+        console.error("[RightSidebar] get_events failed:", e);
+      }
+
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const un = await listen<TrackedEvent>("events://new", (event) => {
+          console.log("[RightSidebar] events://new ←", event.payload);
+          setEvents((prev) => [event.payload, ...prev]);
+        });
+        if (cancelled) un();
+        else unlisten = un;
+      } catch (e) {
+        console.error("[RightSidebar] events://new listen failed:", e);
+      }
+    }
+
+    setup();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   return (
     <aside className="right-sidebar">
       <div className="events-header">
@@ -40,14 +72,14 @@ function RightSidebar() {
       </div>
 
       <ul className="event-list">
-        {EVENTS.map((ev, i) => (
-          <li key={`${ev.time}-${i}`} className="event-item">
+        {events.map((ev) => (
+          <li key={ev.id} className="event-item">
             <span
               className="event-dot"
               style={{ background: KIND_COLOR[ev.kind] }}
             />
             <div className="event-body">
-              <span className="event-time">{ev.time}</span>
+              <span className="event-time">{formatTime(ev.ts)}</span>
               <span className="event-text">{ev.text}</span>
             </div>
           </li>

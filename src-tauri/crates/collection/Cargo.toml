@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 core-shared = { path = "../core-shared" }
+# 번들 SQLite — 이벤트 영속 저장 (C 컴파일러로 sqlite3를 빌드한다)
+rusqlite = { version = "0.31", features = ["bundled"] }
