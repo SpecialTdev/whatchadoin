@@ -192,7 +192,7 @@ pub fn run() {
                 }
             });
 
-            // 실행 중인 OS 프로세스를 주기적으로 수집해 main 창 Events에 push한다.
+            // 실행 중인 OS 프로세스를 주기적으로 수집해 DB에 기록한다.
             let process_handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut tracker = collection::ProcessTracker::default();
@@ -213,20 +213,9 @@ pub fn run() {
                     }
 
                     for process_event in process_events {
-                        let event = {
-                            let state = process_handle.state::<Mutex<collection::Collector>>();
-                            let mut c = state.lock().unwrap();
-                            c.record_process_event(&process_event)
-                        };
-                        if let Some(ev) = event {
-                            let _ = process_handle.emit_to(
-                                EventTarget::WebviewWindow {
-                                    label: "main".to_string(),
-                                },
-                                "events://new",
-                                ev,
-                            );
-                        }
+                        let state = process_handle.state::<Mutex<collection::Collector>>();
+                        let mut c = state.lock().unwrap();
+                        let _ = c.record_process_event(&process_event);
                     }
 
                     std::thread::sleep(std::time::Duration::from_secs(5));

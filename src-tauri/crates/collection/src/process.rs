@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::process::Command;
 
 const SNAPSHOT_GROUP_LIMIT: usize = 16;
+
+// 실제 화면에 떠 있는 창만 추적한다. 앞으로 앱을 추가할 때는 실행 파일명을 여기에 더한다.
 const TRACKED_PROCESS_NAMES: &[&str] = &["chrome.exe", "KakaoTalk.exe"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,15 +25,21 @@ pub enum ProcessEvent {
 
 #[derive(Default)]
 pub struct ProcessTracker {
-    prev: Option<HashMap<u32, String>>,
+    prev: Option<HashMap<String, VisibleWindow>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VisibleWindow {
+    pid: u32,
+    label: String,
 }
 
 impl ProcessTracker {
     pub fn poll(&mut self) -> Result<Vec<ProcessEvent>, String> {
-        let current = list_processes()?;
+        let current = list_visible_windows()?;
         let events = match &self.prev {
             None => initial_snapshot(&current),
-            Some(prev) => diff_processes(prev, &current),
+            Some(prev) => diff_windows(prev, &current),
         };
         self.prev = Some(current);
         Ok(events)
@@ -43,75 +51,75 @@ impl ProcessEvent {
         match self {
             ProcessEvent::Snapshot { total, groups } => {
                 if groups.is_empty() {
-                    return format!("프로세스 스냅샷 - {}개 실행 중", total);
+                    return format!("화면 프로세스 스냅샷 - {}개 표시 중", total);
                 }
                 format!(
-                    "프로세스 스냅샷 - {}개 실행 중: {}",
+                    "화면 프로세스 스냅샷 - {}개 표시 중: {}",
                     total,
                     format_groups(groups)
                 )
             }
-            ProcessEvent::Started(group) => format!("프로세스 시작 - {}", format_group(group)),
-            ProcessEvent::Stopped(group) => format!("프로세스 종료 - {}", format_group(group)),
+            ProcessEvent::Started(group) => format!("화면에 표시 - {}", format_group(group)),
+            ProcessEvent::Stopped(group) => format!("화면에서 사라짐 - {}", format_group(group)),
         }
     }
 }
 
-fn initial_snapshot(processes: &HashMap<u32, String>) -> Vec<ProcessEvent> {
-    if processes.is_empty() {
+fn initial_snapshot(windows: &HashMap<String, VisibleWindow>) -> Vec<ProcessEvent> {
+    if windows.is_empty() {
         return Vec::new();
     }
-    let mut groups = group_by_name(processes);
+    let mut groups = group_by_label(windows.values());
     groups.truncate(SNAPSHOT_GROUP_LIMIT);
     vec![ProcessEvent::Snapshot {
-        total: processes.len(),
+        total: windows.len(),
         groups,
     }]
 }
 
-fn diff_processes(
-    prev: &HashMap<u32, String>,
-    current: &HashMap<u32, String>,
+fn diff_windows(
+    prev: &HashMap<String, VisibleWindow>,
+    current: &HashMap<String, VisibleWindow>,
 ) -> Vec<ProcessEvent> {
-    let mut started = HashMap::new();
-    let mut stopped = HashMap::new();
-
-    for (pid, name) in current {
-        if prev.get(pid) != Some(name) {
-            started.insert(*pid, name.clone());
-        }
-    }
-
-    for (pid, name) in prev {
-        if current.get(pid) != Some(name) {
-            stopped.insert(*pid, name.clone());
-        }
-    }
+    let started = current
+        .iter()
+        .filter(|(key, window)| prev.get(*key) != Some(*window))
+        .map(|(_, window)| window.clone())
+        .collect::<Vec<_>>();
+    let stopped = prev
+        .iter()
+        .filter(|(key, window)| current.get(*key) != Some(*window))
+        .map(|(_, window)| window.clone())
+        .collect::<Vec<_>>();
 
     let mut events = Vec::new();
     events.extend(
-        group_by_name(&started)
+        group_by_label(started.iter())
             .into_iter()
             .map(ProcessEvent::Started),
     );
     events.extend(
-        group_by_name(&stopped)
+        group_by_label(stopped.iter())
             .into_iter()
             .map(ProcessEvent::Stopped),
     );
     events
 }
 
-fn group_by_name(processes: &HashMap<u32, String>) -> Vec<ProcessGroup> {
-    let mut by_name: BTreeMap<String, Vec<u32>> = BTreeMap::new();
-    for (pid, name) in processes {
-        by_name.entry(name.clone()).or_default().push(*pid);
+fn group_by_label<'a>(windows: impl Iterator<Item = &'a VisibleWindow>) -> Vec<ProcessGroup> {
+    let mut by_label: BTreeMap<String, Vec<u32>> = BTreeMap::new();
+    for window in windows {
+        by_label
+            .entry(window.label.clone())
+            .or_default()
+            .push(window.pid);
     }
 
-    let mut groups: Vec<ProcessGroup> = by_name
+    let mut groups: Vec<ProcessGroup> = by_label
         .into_iter()
         .map(|(name, mut pids)| {
             pids.sort_unstable();
+            pids.dedup();
             ProcessGroup {
                 count: pids.len(),
                 name,
@@ -150,7 +158,36 @@ fn format_group(group: &ProcessGroup) -> String {
 }
 
 #[cfg(target_os = "windows")]
-fn list_processes() -> Result<HashMap<u32, String>, String> {
+fn list_visible_windows() -> Result<HashMap<String, VisibleWindow>, String> {
+    let process_names = list_tasklist_processes()?;
+    let raw_windows = enum_visible_windows();
+    let mut windows = HashMap::new();
+
+    for raw in raw_windows {
+        let Some(process_name) = process_names.get(&raw.pid) else {
+            continue;
+        };
+        if !is_tracked_process(process_name) {
+            continue;
+        }
+        let Some(label) = window_label(process_name, &raw.title) else {
+            continue;
+        };
+        let key = format!("{}:{}", raw.pid, label.to_ascii_lowercase());
+        windows.insert(
+            key,
+            VisibleWindow {
+                pid: raw.pid,
+                label,
+            },
+        );
+    }
+
+    Ok(windows)
+}
+
+#[cfg(target_os = "windows")]
+fn list_tasklist_processes() -> Result<HashMap<u32, String>, String> {
     let output = Command::new("tasklist")
         .args(["/FO", "CSV", "/NH"])
         .output()
@@ -173,16 +210,7 @@ fn list_processes() -> Result<HashMap<u32, String>, String> {
             continue;
         }
         let name = cols[0].trim();
-        if name.eq_ignore_ascii_case("tasklist.exe") {
-            continue;
-        }
         if !is_tracked_process(name) {
-            continue;
-        }
-        if cols
-            .get(2)
-            .is_some_and(|session| session.eq_ignore_ascii_case("Services"))
-        {
             continue;
         }
         let Ok(pid) = cols[1].trim().parse::<u32>() else {
@@ -196,8 +224,65 @@ fn list_processes() -> Result<HashMap<u32, String>, String> {
     Ok(processes)
 }
 
+#[cfg(target_os = "windows")]
+#[derive(Debug)]
+struct RawWindow {
+    pid: u32,
+    title: String,
+}
+
+#[cfg(target_os = "windows")]
+fn enum_visible_windows() -> Vec<RawWindow> {
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
+        IsWindowVisible,
+    };
+
+    unsafe extern "system" fn callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let windows = &mut *(lparam.0 as *mut Vec<RawWindow>);
+
+        if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+            return true.into();
+        }
+
+        let len = GetWindowTextLengthW(hwnd);
+        if len <= 0 {
+            return true.into();
+        }
+
+        let mut pid = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == 0 {
+            return true.into();
+        }
+
+        let mut buf = vec![0u16; len as usize + 1];
+        let read = GetWindowTextW(hwnd, &mut buf);
+        if read <= 0 {
+            return true.into();
+        }
+
+        let title = String::from_utf16_lossy(&buf[..read as usize])
+            .trim()
+            .to_string();
+        if !title.is_empty() {
+            windows.push(RawWindow { pid, title });
+        }
+
+        true.into()
+    }
+
+    let mut windows = Vec::new();
+    unsafe {
+        let _ = EnumWindows(Some(callback), LPARAM(&mut windows as *mut _ as isize));
+    }
+    windows
+}
+
 #[cfg(not(target_os = "windows"))]
-fn list_processes() -> Result<HashMap<u32, String>, String> {
+fn list_visible_windows() -> Result<HashMap<String, VisibleWindow>, String> {
     let output = Command::new("ps")
         .args(["-eo", "pid=,comm="])
         .output()
@@ -213,7 +298,7 @@ fn list_processes() -> Result<HashMap<u32, String>, String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut processes = HashMap::new();
+    let mut windows = HashMap::new();
     for line in stdout.lines() {
         let mut parts = line.trim().splitn(2, char::is_whitespace);
         let Some(pid_raw) = parts.next() else {
@@ -226,18 +311,42 @@ fn list_processes() -> Result<HashMap<u32, String>, String> {
             continue;
         };
         let name = name_raw.trim();
-        if name == "ps" {
+        if pid == 0 || name.is_empty() || !is_tracked_process(name) {
             continue;
         }
-        if !is_tracked_process(name) {
-            continue;
-        }
-        if pid == 0 || name.is_empty() {
-            continue;
-        }
-        processes.insert(pid, name.to_string());
+        let label = name.to_string();
+        windows.insert(label.to_ascii_lowercase(), VisibleWindow { pid, label });
     }
-    Ok(processes)
+    Ok(windows)
+}
+
+fn window_label(process_name: &str, title: &str) -> Option<String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return None;
+    }
+
+    if process_name.eq_ignore_ascii_case("chrome.exe") {
+        let tab = title
+            .strip_suffix(" - Google Chrome")
+            .or_else(|| title.strip_suffix(" - Chrome"))
+            .unwrap_or(title)
+            .trim();
+        if tab.is_empty() {
+            return None;
+        }
+        return Some(format!("Chrome - {}", tab));
+    }
+
+    if process_name.eq_ignore_ascii_case("KakaoTalk.exe") {
+        return Some(if title.eq_ignore_ascii_case("KakaoTalk") {
+            "KakaoTalk".to_string()
+        } else {
+            format!("KakaoTalk - {}", title)
+        });
+    }
+
+    Some(format!("{} - {}", process_name, title))
 }
 
 fn is_tracked_process(name: &str) -> bool {
@@ -288,13 +397,16 @@ mod tests {
         let event = ProcessEvent::Snapshot {
             total: 3,
             groups: vec![ProcessGroup {
-                name: "chrome.exe".to_string(),
+                name: "Chrome - OpenAI".to_string(),
                 count: 2,
                 pids: vec![10, 11],
             }],
         };
 
-        assert_eq!(event.text(), "프로세스 스냅샷 - 3개 실행 중: chrome.exe x2");
+        assert_eq!(
+            event.text(),
+            "화면 프로세스 스냅샷 - 3개 표시 중: Chrome - OpenAI x2"
+        );
     }
 
     #[test]
@@ -305,21 +417,56 @@ mod tests {
     }
 
     #[test]
-    fn groups_started_processes_by_name() {
-        let prev = HashMap::from([(1, "Code.exe".to_string())]);
-        let current = HashMap::from([
-            (1, "Code.exe".to_string()),
-            (2, "chrome.exe".to_string()),
-            (3, "chrome.exe".to_string()),
-        ]);
+    fn extracts_chrome_tab_title() {
+        assert_eq!(
+            window_label("chrome.exe", "OpenAI - Google Chrome"),
+            Some("Chrome - OpenAI".to_string())
+        );
+    }
+
+    #[test]
+    fn labels_kakaotalk_windows() {
+        assert_eq!(
+            window_label("KakaoTalk.exe", "KakaoTalk"),
+            Some("KakaoTalk".to_string())
+        );
+        assert_eq!(
+            window_label("KakaoTalk.exe", "친구"),
+            Some("KakaoTalk - 친구".to_string())
+        );
+    }
+
+    #[test]
+    fn diffs_visible_window_changes() {
+        let prev = HashMap::from([(
+            "1:chrome - openai".to_string(),
+            VisibleWindow {
+                pid: 1,
+                label: "Chrome - OpenAI".to_string(),
+            },
+        )]);
+        let current = HashMap::from([(
+            "2:kakaotalk".to_string(),
+            VisibleWindow {
+                pid: 2,
+                label: "KakaoTalk".to_string(),
+            },
+        )]);
 
         assert_eq!(
-            diff_processes(&prev, &current),
-            vec![ProcessEvent::Started(ProcessGroup {
-                name: "chrome.exe".to_string(),
-                count: 2,
-                pids: vec![2, 3],
-            })]
+            diff_windows(&prev, &current),
+            vec![
+                ProcessEvent::Started(ProcessGroup {
+                    name: "KakaoTalk".to_string(),
+                    count: 1,
+                    pids: vec![2],
+                }),
+                ProcessEvent::Stopped(ProcessGroup {
+                    name: "Chrome - OpenAI".to_string(),
+                    count: 1,
+                    pids: vec![1],
+                }),
+            ]
         );
     }
 }
