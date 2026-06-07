@@ -10,6 +10,31 @@ pub struct ReportDto {
     // TODO: 칸반/insight 등 리포트 필드 정의
 }
 
+/// 업무 이벤트 종류. phase 1은 note/checkin만. phase 2/3에서 App/Web/Comm 추가 예정.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EventKind {
+    /// workspace note(todo) 변경
+    Note,
+    /// 체크인 팝업 응답
+    Checkin,
+}
+
+/// 백그라운드 추적이 기록하는 단일 업무 이벤트.
+///
+/// `collection` 크레이트가 생성·영속하고, UI(right sidebar)가 표출한다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Event {
+    /// DB row id (auto-increment)
+    pub id: i64,
+    /// 발생 시각 (unix epoch milliseconds)
+    pub ts: i64,
+    pub kind: EventKind,
+    /// 사람이 읽는 요약 문구 (예: "할 일 추가 — '리포트 정리'")
+    pub text: String,
+}
+
 /// 처리 엔진이 외부(app-service)에 노출하는 인터페이스.
 ///
 /// `processing` 크레이트가 구현하고, `app-service`가 호출한다.

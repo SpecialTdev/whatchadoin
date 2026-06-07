@@ -1,0 +1,23 @@
+body,
+html,
+#root {
+  height: auto;
+  overflow: hidden;
+}
+
+.checkin-window {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  background: var(--surface);
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.checkin-loading {
+  padding: 1.5rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  min-height: 100vh;
+}
