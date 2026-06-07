@@ -4,10 +4,19 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# 포커스된 최상위 윈도우(앱·제목) 조회 — Windows/macOS/Linux 공통.
+active-win-pos-rs = "0.11.0"
 core-shared = { path = "../core-shared" }
 # 번들 SQLite — 이벤트 영속 저장 (C 컴파일러로 sqlite3를 빌드한다)
 rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Windows: 화면에 떠 있는 창 열거(EnumWindows)에만 쓰이므로 Windows 타겟으로 한정한다.
+[target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+# macOS: 포커스 폴링이 NSWorkspace의 autorelease 객체를 새지 않도록 풀로 감싼다.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
