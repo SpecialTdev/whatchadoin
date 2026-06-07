@@ -3,8 +3,31 @@ use std::process::Command;
 
 const SNAPSHOT_GROUP_LIMIT: usize = 16;
 
-// 실제 화면에 떠 있는 창만 추적한다. 앞으로 앱을 추가할 때는 실행 파일명을 여기에 더한다.
-const TRACKED_PROCESS_NAMES: &[&str] = &["chrome.exe", "KakaoTalk.exe"];
+// 추적 대상은 OS마다 이름이 다르다 (Windows는 .exe, macOS는 앱 실행 파일명).
+// 앱을 추가할 때는 해당 OS의 이름을 여기에 더한다.
+#[cfg(target_os = "windows")]
+const TRACKED_PROCESS_NAMES: &[&str] = &[
+    "chrome.exe",
+    "msedge.exe",
+    "whale.exe",
+    "firefox.exe",
+    "KakaoTalk.exe",
+];
+
+#[cfg(target_os = "macos")]
+const TRACKED_PROCESS_NAMES: &[&str] = &[
+    "Google Chrome",
+    "Safari",
+    "Microsoft Edge",
+    "Whale",
+    "Dia",
+    "Arc",
+    "Firefox",
+    "KakaoTalk",
+];
+
+#[cfg(all(unix, not(target_os = "macos")))]
+const TRACKED_PROCESS_NAMES: &[&str] = &["chrome", "chromium", "firefox", "msedge"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessGroup {
@@ -310,7 +333,9 @@ fn list_visible_windows() -> Result<HashMap<String, VisibleWindow>, String> {
         let Ok(pid) = pid_raw.parse::<u32>() else {
             continue;
         };
-        let name = name_raw.trim();
+        // macOS의 `comm`은 전체 실행 파일 경로를 주므로 파일명만 추출한다
+        // (Linux의 짧은 이름은 슬래시가 없어 그대로 통과한다).
+        let name = basename(name_raw);
         if pid == 0 || name.is_empty() || !is_tracked_process(name) {
             continue;
         }
@@ -353,6 +378,16 @@ fn is_tracked_process(name: &str) -> bool {
     TRACKED_PROCESS_NAMES
         .iter()
         .any(|tracked| tracked.eq_ignore_ascii_case(name))
+}
+
+/// 경로에서 파일명만 추출한다. 슬래시가 없으면 입력을 그대로 돌려준다.
+#[cfg(not(target_os = "windows"))]
+fn basename(raw: &str) -> &str {
+    let raw = raw.trim();
+    std::path::Path::new(raw)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(raw)
 }
 
 fn parse_csv_line(line: &str) -> Vec<String> {
@@ -409,11 +444,33 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn only_tracks_whitelisted_process_names() {
         assert!(is_tracked_process("chrome.exe"));
         assert!(is_tracked_process("KAKAOTALK.EXE"));
         assert!(!is_tracked_process("Code.exe"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn only_tracks_whitelisted_process_names() {
+        assert!(is_tracked_process("Google Chrome"));
+        assert!(is_tracked_process("kakaotalk"));
+        assert!(is_tracked_process("Dia"));
+        assert!(!is_tracked_process("chrome.exe"));
+        assert!(!is_tracked_process("Code"));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn extracts_basename_from_path() {
+        assert_eq!(
+            basename("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            "Google Chrome"
+        );
+        assert_eq!(basename("chrome"), "chrome");
+        assert_eq!(basename("  /usr/bin/ps  "), "ps");
     }
 
     #[test]

@@ -222,6 +222,33 @@ pub fn run() {
                 }
             });
 
+            // 포커스된 최상위 윈도우(앱·제목) 변화를 수집해 main 창 Events에 push한다.
+            let focus_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let mut tracker = collection::WindowTracker::default();
+                loop {
+                    if let Some(focus_event) = tracker.poll() {
+                        println!("[Rust] focus changed → {}", focus_event.text());
+                        let event = {
+                            let state = focus_handle.state::<Mutex<collection::Collector>>();
+                            let mut c = state.lock().unwrap();
+                            c.record_focus_event(&focus_event)
+                        };
+                        if let Some(ev) = event {
+                            let _ = focus_handle.emit_to(
+                                EventTarget::WebviewWindow {
+                                    label: "main".to_string(),
+                                },
+                                "events://new",
+                                ev,
+                            );
+                        }
+                    }
+
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+            });
+
             // 체크인 창을 시작 시 숨긴 채로 미리 만들어 둔다 (open 시 즉시 show만 하도록).
             if let Err(e) = build_checkin_window(app.handle()) {
                 println!("[Rust] failed to pre-build checkin window: {}", e);
