@@ -5,7 +5,12 @@ import WorkView from "../components/WorkView";
 import ReportView from "../components/ReportView";
 import SettingsView from "../components/SettingsView";
 import { parseMarkdown, serializeBoard, newCard, newColumn } from "../lib/kanban";
-import { fetchEvents, workDayKey, type TrackedEvent } from "../lib/events";
+import {
+  fetchEvents,
+  isReportEvent,
+  workDayKey,
+  type TrackedEvent,
+} from "../lib/events";
 import "./App.css";
 
 export type Tab = "work" | "report" | "settings";
@@ -226,7 +231,9 @@ function App() {
   // 이벤트에서 업무일 목록을 도출 (최신순). 하루 경계 설정을 반영.
   const reportDates = useMemo(() => {
     const set = new Set<string>();
-    for (const ev of reportEvents) set.add(workDayKey(ev.ts, dayBoundaryHour));
+    for (const ev of reportEvents) {
+      if (isReportEvent(ev)) set.add(workDayKey(ev.ts, dayBoundaryHour));
+    }
     return Array.from(set).sort().reverse();
   }, [reportEvents, dayBoundaryHour]);
 
@@ -240,7 +247,11 @@ function App() {
   const reportDayEvents = useMemo(
     () =>
       reportEvents
-        .filter((ev) => workDayKey(ev.ts, dayBoundaryHour) === selectedDate)
+        .filter(
+          (ev) =>
+            isReportEvent(ev) &&
+            workDayKey(ev.ts, dayBoundaryHour) === selectedDate,
+        )
         .sort((a, b) => a.ts - b.ts),
     [reportEvents, dayBoundaryHour, selectedDate],
   );

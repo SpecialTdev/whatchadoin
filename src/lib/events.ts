@@ -2,7 +2,7 @@
 // Rust collection crate가 생성·영속하는 Event를 프런트(RightSidebar, ReportView)에서
 // 공통으로 다룬다.
 
-export type EventKind = "note" | "checkin";
+export type EventKind = "note" | "checkin" | "process";
 
 export interface TrackedEvent {
   id: number;
@@ -15,7 +15,12 @@ export interface TrackedEvent {
 export const KIND_COLOR: Record<EventKind, string> = {
   note: "#2ecc71", // 노트(todo) 변경
   checkin: "#4f8cff", // 체크인 응답
+  process: "#e67e22", // OS 프로세스 변화
 };
+
+export function isReportEvent(ev: TrackedEvent): boolean {
+  return ev.kind === "note" || ev.kind === "checkin";
+}
 
 // Rust에서 저장된 모든 이벤트를 최신순으로 가져온다.
 export async function fetchEvents(): Promise<TrackedEvent[]> {

@@ -192,6 +192,47 @@ pub fn run() {
                 }
             });
 
+            // 실행 중인 OS 프로세스를 주기적으로 수집해 main 창 Events에 push한다.
+            let process_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let mut tracker = collection::ProcessTracker::default();
+                loop {
+                    let process_events = match tracker.poll() {
+                        Ok(events) => events,
+                        Err(e) => {
+                            println!("[Rust] process poll failed: {}", e);
+                            Vec::new()
+                        }
+                    };
+
+                    if !process_events.is_empty() {
+                        println!(
+                            "[Rust] process poll tick → {} new event(s)",
+                            process_events.len()
+                        );
+                    }
+
+                    for process_event in process_events {
+                        let event = {
+                            let state = process_handle.state::<Mutex<collection::Collector>>();
+                            let mut c = state.lock().unwrap();
+                            c.record_process_event(&process_event)
+                        };
+                        if let Some(ev) = event {
+                            let _ = process_handle.emit_to(
+                                EventTarget::WebviewWindow {
+                                    label: "main".to_string(),
+                                },
+                                "events://new",
+                                ev,
+                            );
+                        }
+                    }
+
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                }
+            });
+
             // 체크인 창을 시작 시 숨긴 채로 미리 만들어 둔다 (open 시 즉시 show만 하도록).
             if let Err(e) = build_checkin_window(app.handle()) {
                 println!("[Rust] failed to pre-build checkin window: {}", e);

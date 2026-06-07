@@ -18,6 +18,8 @@ pub enum EventKind {
     Note,
     /// 체크인 팝업 응답
     Checkin,
+    /// 실행 중인 OS 프로세스 변화
+    Process,
 }
 
 /// 백그라운드 추적이 기록하는 단일 업무 이벤트.

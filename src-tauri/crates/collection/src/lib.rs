@@ -13,6 +13,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use core_shared::{Event, EventKind};
 use rusqlite::{params, Connection};
 
+mod process;
+pub use process::{ProcessEvent, ProcessTracker};
+
 /// 수집 파이프라인 핸들. tauri-main이 생성해 tauri state로 관리한다.
 pub struct Collector {
     conn: Connection,
@@ -82,6 +85,11 @@ impl Collector {
         self.insert(EventKind::Checkin, &text).ok()
     }
 
+    /// OS 프로세스 스냅샷/변화를 업무 이벤트로 기록한다.
+    pub fn record_process_event(&mut self, event: &ProcessEvent) -> Option<Event> {
+        self.insert(EventKind::Process, &event.text()).ok()
+    }
+
     /// 저장된 모든 이벤트를 최신순으로 반환한다 (right sidebar 초기 로드용).
     pub fn all_events(&self) -> Vec<Event> {
         let mut stmt = match self
@@ -132,12 +140,14 @@ fn kind_to_str(k: EventKind) -> &'static str {
     match k {
         EventKind::Note => "note",
         EventKind::Checkin => "checkin",
+        EventKind::Process => "process",
     }
 }
 
 fn kind_from_str(s: &str) -> EventKind {
     match s {
         "checkin" => EventKind::Checkin,
+        "process" => EventKind::Process,
         _ => EventKind::Note,
     }
 }
