@@ -38,4 +38,5 @@ app-service = { path = "crates/app-service" }
 processing = { path = "crates/processing" }
 collection = { path = "crates/collection" }
 core-shared = { path = "crates/core-shared" }
+tauri-plugin-notification = "2.3.3"
 
