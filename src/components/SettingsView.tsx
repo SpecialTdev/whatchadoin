@@ -13,9 +13,21 @@ interface Props {
 
 const STEP_SEC = 10;
 
+type ExportPrivacyLevel = 1 | 2 | 3;
+
 interface ExportedDb {
   path: string;
 }
+
+const EXPORT_LEVELS: Array<{
+  value: ExportPrivacyLevel;
+  title: string;
+  detail: string;
+}> = [
+  { value: 1, title: "1단계", detail: "Raw data" },
+  { value: 2, title: "2단계", detail: "Window name 비식별화" },
+  { value: 3, title: "3단계", detail: "Task 이름 난독화" },
+];
 
 // 초 → "N분 M초" (M=0이면 "N분")
 function fmtInterval(sec: number): string {
@@ -47,15 +59,24 @@ function SettingsView({
   onBoundaryChange,
 }: Props) {
   const [isExporting, setIsExporting] = useState(false);
+  const [exportLevel, setExportLevel] = useState<ExportPrivacyLevel>(1);
   const [exportPath, setExportPath] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+
+  function selectExportLevel(level: ExportPrivacyLevel) {
+    setExportLevel(level);
+    setExportPath(null);
+    setExportError(null);
+  }
 
   async function exportDb() {
     setIsExporting(true);
     setExportError(null);
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      const exported = await invoke<ExportedDb>("export_events_db");
+      const exported = await invoke<ExportedDb>("export_events_db", {
+        privacyLevel: exportLevel,
+      });
       setExportPath(exported.path);
     } catch (e) {
       setExportError(errorMessage(e));
@@ -131,6 +152,22 @@ function SettingsView({
       <section className="settings-section">
         <h2>DB 내보내기</h2>
         <p className="hint">저장된 이벤트 DB를 Downloads 폴더에 SQLite 파일로 복사합니다.</p>
+
+        <div className="settings-export-levels" role="radiogroup" aria-label="DB 내보내기 단계">
+          {EXPORT_LEVELS.map((level) => (
+            <button
+              key={level.value}
+              className={`settings-level-btn${exportLevel === level.value ? " active" : ""}`}
+              type="button"
+              aria-pressed={exportLevel === level.value}
+              onClick={() => selectExportLevel(level.value)}
+              disabled={isExporting}
+            >
+              <span className="settings-level-title">{level.title}</span>
+              <span className="settings-level-detail">{level.detail}</span>
+            </button>
+          ))}
+        </div>
 
         <div className="settings-action-row">
           <button

@@ -148,7 +148,10 @@ fn get_events(
 fn export_events_db(
     app: AppHandle,
     collector: tauri::State<'_, Mutex<collection::Collector>>,
+    privacy_level: Option<u8>,
 ) -> Result<ExportedDb, String> {
+    let privacy_level = collection::ExportPrivacyLevel::from_step(privacy_level.unwrap_or(1))
+        .ok_or_else(|| "지원하지 않는 DB 내보내기 단계입니다.".to_string())?;
     let downloads = app
         .path()
         .download_dir()
@@ -156,11 +159,11 @@ fn export_events_db(
     std::fs::create_dir_all(&downloads)
         .map_err(|e| format!("다운로드 폴더를 만들지 못했습니다: {e}"))?;
 
-    let dest = unique_export_path(&downloads);
+    let dest = unique_export_path(&downloads, privacy_level);
     collector
         .lock()
         .unwrap()
-        .export_to(&dest)
+        .export_to(&dest, privacy_level)
         .map_err(|e| format!("DB 내보내기에 실패했습니다: {e}"))?;
 
     Ok(ExportedDb {
@@ -190,12 +193,12 @@ fn direct_input(app: AppHandle) {
     }
 }
 
-fn unique_export_path(dir: &Path) -> PathBuf {
+fn unique_export_path(dir: &Path, privacy_level: collection::ExportPrivacyLevel) -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let base = format!("whatchadoin-events-{stamp}");
+    let base = format!("whatchadoin-events-{}-{stamp}", privacy_level.file_suffix());
     let mut dest = dir.join(format!("{base}.db"));
     let mut n = 1;
     while dest.exists() {
