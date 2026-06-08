@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 interface Props {
   intervalSec: number;
   minSec: number;
@@ -10,6 +12,10 @@ interface Props {
 }
 
 const STEP_SEC = 10;
+
+interface ExportedDb {
+  path: string;
+}
 
 // 초 → "N분 M초" (M=0이면 "N분")
 function fmtInterval(sec: number): string {
@@ -26,6 +32,10 @@ function fmtBoundary(h: number): string {
   return `오후 ${h - 12}시`;
 }
 
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 function SettingsView({
   intervalSec,
   minSec,
@@ -36,6 +46,35 @@ function SettingsView({
   maxBoundary,
   onBoundaryChange,
 }: Props) {
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportPath, setExportPath] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  async function exportDb() {
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const exported = await invoke<ExportedDb>("export_events_db");
+      setExportPath(exported.path);
+    } catch (e) {
+      setExportError(errorMessage(e));
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  async function revealExportedDb() {
+    if (!exportPath) return;
+    setExportError(null);
+    try {
+      const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
+      await revealItemInDir(exportPath);
+    } catch (e) {
+      setExportError(`파일은 생성됐지만 폴더를 열지 못했습니다: ${errorMessage(e)}`);
+    }
+  }
+
   return (
     <div className="settings-view">
       <header className="settings-header">
@@ -87,6 +126,34 @@ function SettingsView({
             <span>{fmtBoundary(maxBoundary)}</span>
           </div>
         </div>
+      </section>
+
+      <section className="settings-section">
+        <h2>DB 내보내기</h2>
+        <p className="hint">저장된 이벤트 DB를 Downloads 폴더에 SQLite 파일로 복사합니다.</p>
+
+        <div className="settings-action-row">
+          <button
+            className="settings-action-btn"
+            type="button"
+            onClick={exportDb}
+            disabled={isExporting}
+          >
+            {isExporting ? "내보내는 중..." : "DB 내보내기"}
+          </button>
+          {exportPath && (
+            <button
+              className="settings-secondary-btn"
+              type="button"
+              onClick={revealExportedDb}
+            >
+              폴더에서 보기
+            </button>
+          )}
+        </div>
+
+        {exportPath && <p className="settings-export-path">{exportPath}</p>}
+        {exportError && <p className="settings-error">{exportError}</p>}
       </section>
     </div>
   );

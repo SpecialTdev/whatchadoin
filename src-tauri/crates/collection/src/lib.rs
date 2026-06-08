@@ -122,6 +122,12 @@ impl Collector {
         }
     }
 
+    /// 열린 DB에서 일관된 SQLite 스냅샷 파일을 만든다.
+    pub fn export_to(&self, dest: &Path) -> rusqlite::Result<()> {
+        let sql = format!("VACUUM INTO {}", sql_string_literal(&dest.to_string_lossy()));
+        self.conn.execute_batch(&sql)
+    }
+
     fn insert(&self, kind: EventKind, text: &str) -> rusqlite::Result<Event> {
         let ts = now_millis();
         self.conn.execute(
@@ -160,6 +166,10 @@ fn kind_from_str(s: &str) -> EventKind {
         "window" => EventKind::Window,
         _ => EventKind::Note,
     }
+}
+
+fn sql_string_literal(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
 }
 
 // ── 마크다운 todo 파싱 + diff ────────────────────────────────────────────────
@@ -312,5 +322,36 @@ mod tests {
     fn no_change_no_events() {
         let s = "# 오늘\n## 진행 중\n- [ ] A\n- [x] B\n## 메모\n자유 텍스트\n";
         assert!(diff(s, s).is_empty());
+    }
+
+    #[test]
+    fn export_to_writes_sqlite_snapshot() {
+        let stamp = now_millis();
+        let db_path = std::env::temp_dir().join(format!(
+            "whatchadoin-test-{}-{}.db",
+            std::process::id(),
+            stamp
+        ));
+        let export_path = std::env::temp_dir().join(format!(
+            "whatchadoin-export-{}-{}-'copy'.db",
+            std::process::id(),
+            stamp
+        ));
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(&export_path);
+
+        let mut collector = Collector::open(&db_path).unwrap();
+        collector.record_checkin("DB export");
+        collector.export_to(&export_path).unwrap();
+
+        let exported = Collector::open(&export_path).unwrap();
+        let events = exported.all_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].text, "체크인 — 'DB export' 작업 중");
+
+        drop(exported);
+        drop(collector);
+        let _ = std::fs::remove_file(db_path);
+        let _ = std::fs::remove_file(export_path);
     }
 }

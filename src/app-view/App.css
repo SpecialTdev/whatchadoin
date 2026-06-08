@@ -291,6 +291,67 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
+.settings-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.settings-action-btn,
+.settings-secondary-btn {
+  min-height: 36px;
+  border-radius: 6px;
+  padding: 0.45rem 0.75rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-action-btn {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.settings-action-btn:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.settings-action-btn:not(:disabled):hover {
+  filter: brightness(0.96);
+}
+
+.settings-secondary-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.settings-secondary-btn:hover {
+  border-color: var(--accent);
+}
+
+.settings-export-path {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.settings-error {
+  margin: 0.75rem 0 0;
+  color: #b3261e;
+  font-size: 0.85rem;
+}
+
 /* ---------- work view ---------- */
 .work-view {
   display: flex;
