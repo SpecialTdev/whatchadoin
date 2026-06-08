@@ -13,9 +13,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use core_shared::{Event, EventKind};
 use rusqlite::{params, Connection};
 
-mod process;
-pub use process::{ProcessEvent, ProcessTracker};
-
 mod window;
 pub use window::{FocusEvent, WindowTracker};
 
@@ -112,11 +109,6 @@ impl Collector {
     pub fn record_checkin(&mut self, task: &str) -> Option<Event> {
         let text = format!("체크인 — '{}' 작업 중", task);
         self.insert(EventKind::Checkin, &text).ok()
-    }
-
-    /// OS 프로세스 스냅샷/변화를 업무 이벤트로 기록한다.
-    pub fn record_process_event(&mut self, event: &ProcessEvent) -> Option<Event> {
-        self.insert(EventKind::Process, &event.text()).ok()
     }
 
     /// 포커스된 최상위 윈도우(앱) 변화를 업무 이벤트로 기록한다.
