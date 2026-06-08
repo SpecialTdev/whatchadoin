@@ -6,6 +6,7 @@ use std::{
 use tauri::{
     AppHandle, Emitter, EventTarget, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_notification::NotificationExt;
 
 #[derive(Default)]
 struct CheckInState {
@@ -46,6 +47,20 @@ fn build_checkin_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+fn send_checkin_notification(app: &AppHandle) {
+    let result = app
+        .notification()
+        .builder()
+        .title("지금 뭐 하고 있어?")
+        .body("체크인 시간이 됐어요. 열린 체크인 창에서 현재 작업을 확인해 주세요.")
+        .sound("Ping")
+        .show();
+
+    if let Err(e) = result {
+        println!("[Rust] checkin notification failed: {}", e);
+    }
+}
+
 #[tauri::command]
 fn open_checkin(
     app: AppHandle,
@@ -76,6 +91,7 @@ fn open_checkin(
         let _ = win.show();
         let _ = win.set_focus();
     }
+    send_checkin_notification(&app);
 
     // 이미 로드된 웹뷰가 최신 데이터를 다시 가져오게 한다 (stale 방지)
     let _ = app.emit_to(
@@ -218,6 +234,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(Mutex::new(CheckInState::default()))
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // 이벤트 수집기: app data dir의 SQLite에 영속한다.
