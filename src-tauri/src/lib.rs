@@ -1,4 +1,8 @@
-use std::sync::Mutex;
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tauri::{
     AppHandle, Emitter, EventTarget, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
@@ -13,6 +17,11 @@ struct CheckInState {
 struct CheckInData {
     tasks: Vec<String>,
     active_task: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct ExportedDb {
+    path: String,
 }
 
 // 체크인 창을 숨긴 채로 미리 생성한다. 닫기(X)를 눌러도 destroy되지 않고 hide만 하도록
@@ -44,7 +53,10 @@ fn open_checkin(
     tasks: Vec<String>,
     active_task: Option<String>,
 ) {
-    println!("[Rust] open_checkin called, tasks: {:?}, active_task: {:?}", tasks, active_task);
+    println!(
+        "[Rust] open_checkin called, tasks: {:?}, active_task: {:?}",
+        tasks, active_task
+    );
     {
         let mut s = state.lock().unwrap();
         s.tasks = tasks;
@@ -78,7 +90,10 @@ fn open_checkin(
 #[tauri::command]
 fn get_checkin_data(state: tauri::State<'_, Mutex<CheckInState>>) -> CheckInData {
     let s = state.lock().unwrap();
-    println!("[Rust] get_checkin_data called, tasks: {:?}, active_task: {:?}", s.tasks, s.active_task);
+    println!(
+        "[Rust] get_checkin_data called, tasks: {:?}, active_task: {:?}",
+        s.tasks, s.active_task
+    );
     CheckInData {
         tasks: s.tasks.clone(),
         active_task: s.active_task.clone(),
@@ -123,8 +138,37 @@ fn update_note(collector: tauri::State<'_, Mutex<collection::Collector>>, note: 
 
 /// 저장된 모든 이벤트를 최신순으로 반환한다 (right sidebar 초기 로드).
 #[tauri::command]
-fn get_events(collector: tauri::State<'_, Mutex<collection::Collector>>) -> Vec<core_shared::Event> {
+fn get_events(
+    collector: tauri::State<'_, Mutex<collection::Collector>>,
+) -> Vec<core_shared::Event> {
     collector.lock().unwrap().all_events()
+}
+
+#[tauri::command]
+fn export_events_db(
+    app: AppHandle,
+    collector: tauri::State<'_, Mutex<collection::Collector>>,
+    privacy_level: Option<u8>,
+) -> Result<ExportedDb, String> {
+    let privacy_level = collection::ExportPrivacyLevel::from_step(privacy_level.unwrap_or(1))
+        .ok_or_else(|| "지원하지 않는 DB 내보내기 단계입니다.".to_string())?;
+    let downloads = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("다운로드 폴더를 찾지 못했습니다: {e}"))?;
+    std::fs::create_dir_all(&downloads)
+        .map_err(|e| format!("다운로드 폴더를 만들지 못했습니다: {e}"))?;
+
+    let dest = unique_export_path(&downloads, privacy_level);
+    collector
+        .lock()
+        .unwrap()
+        .export_to(&dest, privacy_level)
+        .map_err(|e| format!("DB 내보내기에 실패했습니다: {e}"))?;
+
+    Ok(ExportedDb {
+        path: dest.display().to_string(),
+    })
 }
 
 // 체크인 대신 메인 창에서 직접 입력: 메인 창을 띄워 포커스하고, Work view를
@@ -147,6 +191,21 @@ fn direct_input(app: AppHandle) {
     if let Some(checkin) = app.get_webview_window("checkin") {
         let _ = checkin.hide();
     }
+}
+
+fn unique_export_path(dir: &Path, privacy_level: collection::ExportPrivacyLevel) -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let base = format!("whatchadoin-events-{}-{stamp}", privacy_level.file_suffix());
+    let mut dest = dir.join(format!("{base}.db"));
+    let mut n = 1;
+    while dest.exists() {
+        dest = dir.join(format!("{base}-{n}.db"));
+        n += 1;
+    }
+    dest
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -261,7 +320,8 @@ pub fn run() {
             submit_checkin,
             direct_input,
             update_note,
-            get_events
+            get_events,
+            export_events_db
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
