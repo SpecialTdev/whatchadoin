@@ -216,15 +216,6 @@ body,
   box-shadow: inset 0 -3px 0 0 var(--accent);
 }
 
-/* 종류별 헤더 색을 달리해 순서 변경을 한눈에 확인 (A=accent, B=green). */
-.widget-item[data-widget-type="stub-a"] .widget-header {
-  background: var(--accent-soft);
-}
-
-.widget-item[data-widget-type="stub-b"] .widget-header {
-  background: rgba(46, 204, 113, 0.18);
-}
-
 .widget-header {
   display: flex;
   align-items: center;
@@ -272,10 +263,6 @@ body,
   padding: 0.6rem 0.7rem;
   font-size: 0.85rem;
   color: var(--text-muted);
-}
-
-.widget-stub {
-  font-style: italic;
 }
 
 /* ---------- basic-timer 위젯 ---------- */

@@ -282,12 +282,8 @@ function renderBody(
           onConfigChange={onConfigChange}
         />
       );
-    case "stub-a":
-      return <span className="widget-stub">첫 번째 스텁 위젯 (A)</span>;
-    case "stub-b":
-      return <span className="widget-stub">두 번째 스텁 위젯 (B)</span>;
     default:
-      return <span className="widget-stub">stub</span>;
+      return null; // 알 수 없는(레거시) 타입은 본문 없이 표시
   }
 }
 
