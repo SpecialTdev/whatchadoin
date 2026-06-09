@@ -379,6 +379,212 @@ body,
   cursor: default;
 }
 
+/* ---------- 척추요정(posture-check) 위젯 ---------- */
+/* 좌: 작은 1:1 썸네일 / 우: 슬라이더 → 진행바 → 버튼 세로 배치. */
+.widget-posture {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.posture-thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 6px;
+  background: #000;
+}
+
+.posture-controls {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.posture-interval {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.posture-interval-label {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.posture-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.posture-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.posture-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s linear;
+}
+
+.posture-btn {
+  padding: 0.4rem 0;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.posture-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ---------- 뽀모도로 타이머(ppomodoro-timer) 위젯 ---------- */
+.widget-pomodoro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ppomo-modes {
+  display: flex;
+  gap: 0.3rem;
+  width: 100%;
+}
+
+.ppomo-mode {
+  flex: 1;
+  padding: 0.3rem 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.ppomo-mode.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 원형 카운트다운 인디케이터(도넛): 바깥 원은 conic-gradient로 남은 비율 표시. */
+.ppomo-dial {
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ppomo-face {
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ppomo-time {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.ppomo-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.ppomo-input {
+  width: 1.9rem;
+  padding: 0.1rem 0;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.ppomo-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.ppomo-input::-webkit-inner-spin-button,
+.ppomo-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.ppomo-colon {
+  color: var(--text-muted);
+}
+
+.ppomo-controls {
+  display: flex;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.ppomo-btn {
+  flex: 1;
+  padding: 0.35rem 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.ppomo-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.ppomo-btn.primary {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ppomo-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .add-widget {
   padding-top: 0.5rem;
   display: flex;

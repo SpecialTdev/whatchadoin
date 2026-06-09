@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { notifyAlarm } from "../lib/notify";
 
 interface Props {
   /** 저장된 마지막 사용 길이(초)로 초기화. */
@@ -25,55 +26,6 @@ function clampInt(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.floor(v)));
 }
 
-// 인앱 가청 알람. OS 알림이 막혀 있어도 확실히 소리로 알린다. (Start 클릭으로 오디오가
-// 이미 활성화돼 있어 타이머 콜백에서도 재생 가능.)
-function beep() {
-  try {
-    const Ctx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext;
-    const ctx = new Ctx();
-    if (ctx.state === "suspended") ctx.resume();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.type = "sine";
-    osc.frequency.value = 880;
-    const t = ctx.currentTime;
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
-    osc.start(t);
-    osc.stop(t + 0.7);
-    osc.onended = () => ctx.close();
-  } catch (e) {
-    console.error("[timer] beep failed:", e);
-  }
-}
-
-// 타이머 완료 알람: 인앱 소리 + (권한 있으면) OS 시스템 알림.
-async function notifyTimerDone() {
-  beep();
-  try {
-    const { isPermissionGranted, requestPermission } = await import(
-      "@tauri-apps/plugin-notification"
-    );
-    let granted = await isPermissionGranted();
-    if (!granted) granted = (await requestPermission()) === "granted";
-    if (!granted) return;
-
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("notify", {
-      title: "타이머 완료",
-      body: "설정한 시간이 끝났어요.",
-    });
-  } catch (e) {
-    console.error("[timer] notify failed:", e);
-  }
-}
-
 // 단순 카운트다운 타이머. 실행 상태는 휘발(컴포넌트 로컬), 길이만 영속한다.
 function WidgetTimer({ initialDurationSec, onDurationChange }: Props) {
   const [durationSec, setDurationSec] = useState(initialDurationSec);
@@ -93,7 +45,7 @@ function WidgetTimer({ initialDurationSec, onDurationChange }: Props) {
   useEffect(() => {
     if (running && remaining === 0) {
       setRunning(false);
-      notifyTimerDone();
+      notifyAlarm("타이머 완료", "설정한 시간이 끝났어요.");
     }
   }, [running, remaining]);
 

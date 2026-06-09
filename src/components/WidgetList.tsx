@@ -4,11 +4,16 @@ import {
   type WidgetConfig,
   WIDGET_CATALOG,
   DEFAULT_TIMER_SEC,
+  DEFAULT_POSTURE_SEC,
+  DEFAULT_POMODORO_FOCUS_SEC,
+  DEFAULT_POMODORO_BREAK_SEC,
   newWidget,
   loadWidgets,
   saveWidgets,
 } from "../lib/widgets";
 import WidgetTimer from "./WidgetTimer";
+import WidgetPostureCheck from "./WidgetPostureCheck";
+import WidgetPomodoro from "./WidgetPomodoro";
 
 function WidgetList() {
   const [widgets, setWidgets] = useState<Widget[]>([]);
@@ -260,6 +265,21 @@ function renderBody(
         <WidgetTimer
           initialDurationSec={widget.config?.durationSec ?? DEFAULT_TIMER_SEC}
           onDurationChange={(sec) => onConfigChange({ durationSec: sec })}
+        />
+      );
+    case "posture-check":
+      return (
+        <WidgetPostureCheck
+          initialIntervalSec={widget.config?.intervalSec ?? DEFAULT_POSTURE_SEC}
+          onIntervalChange={(sec) => onConfigChange({ intervalSec: sec })}
+        />
+      );
+    case "ppomodoro-timer":
+      return (
+        <WidgetPomodoro
+          initialFocusSec={widget.config?.focusSec ?? DEFAULT_POMODORO_FOCUS_SEC}
+          initialBreakSec={widget.config?.breakSec ?? DEFAULT_POMODORO_BREAK_SEC}
+          onConfigChange={onConfigChange}
         />
       );
     case "stub-a":
