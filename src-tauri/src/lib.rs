@@ -57,6 +57,9 @@ struct WidgetData {
     #[serde(rename = "type")]
     kind: String, // `type`은 Rust 예약어라 직렬화 이름만 "type"로.
     title: String,
+    // 위젯별 설정은 종류마다 달라 불투명 JSON으로 그대로 보존한다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    config: Option<serde_json::Value>,
 }
 
 // widgets.json 경로. app data dir이 없으면 생성한다.
@@ -349,6 +352,21 @@ fn save_widgets(app: AppHandle, widgets: Vec<WidgetData>) -> Result<(), String> 
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
+// 프런트(위젯 등)가 요청하는 시스템 알림을 띄운다 (타이머 완료 알람 등).
+#[tauri::command]
+fn notify(app: AppHandle, title: String, body: String) {
+    let result = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .sound("Ping")
+        .show();
+    if let Err(e) = result {
+        println!("[Rust] notify failed: {}", e);
+    }
+}
+
 // 체크인 대신 메인 창에서 직접 입력: 메인 창을 띄워 포커스하고, Work view를
 // 활성화하라는 이벤트를 보낸 뒤 체크인 창을 숨긴다.
 #[tauri::command]
@@ -501,7 +519,8 @@ pub fn run() {
             get_events,
             export_events_db,
             get_widgets,
-            save_widgets
+            save_widgets,
+            notify
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -168,6 +168,16 @@ body,
 }
 
 /* ---------- left sidebar: widget list ---------- */
+/* 위젯 목록 컨테이너. 탭 전환에도 타이머가 살아있도록 항상 마운트하고, Work 탭이
+   아닐 때만 숨긴다(언마운트 X). */
+.widget-host {
+  height: 100%;
+}
+
+.widget-host.hidden {
+  display: none;
+}
+
 .widget-list-wrap {
   display: flex;
   flex-direction: column;
@@ -266,6 +276,107 @@ body,
 
 .widget-stub {
   font-style: italic;
+}
+
+/* ---------- basic-timer 위젯 ---------- */
+.widget-timer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.widget-timer-time {
+  text-align: center;
+  font-size: 1.15rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.widget-timer-time.done {
+  color: #e74c3c;
+}
+
+.widget-timer-edit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+}
+
+.widget-timer-input {
+  width: 2.4rem;
+  padding: 0.2rem 0.1rem;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.widget-timer-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.widget-timer-input::-webkit-inner-spin-button,
+.widget-timer-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.widget-timer-colon {
+  color: var(--text-muted);
+}
+
+.widget-timer-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.widget-timer-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s linear;
+}
+
+.widget-timer-controls {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.widget-timer-btn {
+  flex: 1;
+  padding: 0.35rem 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.widget-timer-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.widget-timer-btn.primary {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.widget-timer-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .add-widget {

@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import {
   type Widget,
+  type WidgetConfig,
   WIDGET_CATALOG,
+  DEFAULT_TIMER_SEC,
   newWidget,
   loadWidgets,
   saveWidgets,
 } from "../lib/widgets";
+import WidgetTimer from "./WidgetTimer";
 
 function WidgetList() {
   const [widgets, setWidgets] = useState<Widget[]>([]);
@@ -44,6 +47,15 @@ function WidgetList() {
 
   function removeWidget(id: string) {
     commit(widgets.filter((w) => w.id !== id));
+  }
+
+  // 위젯별 설정 변경 → 병합 후 영속 (예: 타이머의 최근 사용 시간).
+  function setWidgetConfig(id: string, patch: Partial<WidgetConfig>) {
+    commit(
+      widgets.map((w) =>
+        w.id === id ? { ...w, config: { ...w.config, ...patch } } : w,
+      ),
+    );
   }
 
   // ----- drag & drop -----
@@ -120,6 +132,7 @@ function WidgetList() {
             isDropBefore={dropIndex === i}
             isDropAfter={i === widgets.length - 1 && dropIndex === widgets.length}
             onRemove={() => removeWidget(w.id)}
+            onConfigChange={(patch) => setWidgetConfig(w.id, patch)}
             onDragStart={() => startDrag(w.id)}
             onDragMove={moveDrag}
             onDragEnd={endDrag}
@@ -168,6 +181,7 @@ interface ItemProps {
   isDropBefore: boolean;
   isDropAfter: boolean;
   onRemove: () => void;
+  onConfigChange: (patch: Partial<WidgetConfig>) => void;
   onDragStart: () => void;
   onDragMove: (x: number, y: number) => void;
   onDragEnd: () => void;
@@ -179,6 +193,7 @@ function WidgetItem({
   isDropBefore,
   isDropAfter,
   onRemove,
+  onConfigChange,
   onDragStart,
   onDragMove,
   onDragEnd,
@@ -229,14 +244,24 @@ function WidgetItem({
           onClick={onRemove}
         />
       </div>
-      <div className="widget-body">{renderBody(widget)}</div>
+      <div className="widget-body">{renderBody(widget, onConfigChange)}</div>
     </li>
   );
 }
 
-// 위젯 종류별 본문. 지금은 두 종류의 stub — 순서 변경을 눈으로 확인하기 위해 내용을 다르게.
-function renderBody(widget: Widget) {
+// 위젯 종류별 본문.
+function renderBody(
+  widget: Widget,
+  onConfigChange: (patch: Partial<WidgetConfig>) => void,
+) {
   switch (widget.type) {
+    case "basic-timer":
+      return (
+        <WidgetTimer
+          initialDurationSec={widget.config?.durationSec ?? DEFAULT_TIMER_SEC}
+          onDurationChange={(sec) => onConfigChange({ durationSec: sec })}
+        />
+      );
     case "stub-a":
       return <span className="widget-stub">첫 번째 스텁 위젯 (A)</span>;
     case "stub-b":

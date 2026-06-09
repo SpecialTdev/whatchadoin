@@ -34,9 +34,11 @@ function LeftSidebar({
       </div>
 
       <div className="left-sidebar-body">
-        {tab === "work" ? (
+        {/* 위젯 목록은 항상 마운트해 둔다 — 탭을 옮겨도 타이머가 계속 동작/알람하도록. */}
+        <div className={`widget-host${tab === "work" ? "" : " hidden"}`}>
           <WidgetList />
-        ) : (
+        </div>
+        {tab !== "work" && (
           <ul className="date-list">
             {dates.map((date) => (
               <li key={date}>
