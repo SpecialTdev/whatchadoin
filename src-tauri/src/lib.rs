@@ -50,6 +50,22 @@ struct ExportedDb {
     path: String,
 }
 
+// 좌측 사이드바 위젯 한 개. app_data_dir/widgets.json에 JSON으로 영속한다.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct WidgetData {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String, // `type`은 Rust 예약어라 직렬화 이름만 "type"로.
+    title: String,
+}
+
+// widgets.json 경로. app data dir이 없으면 생성한다.
+fn widgets_path(app: &AppHandle) -> Option<PathBuf> {
+    let dir = app.path().app_data_dir().ok()?;
+    std::fs::create_dir_all(&dir).ok();
+    Some(dir.join("widgets.json"))
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.unminimize();
@@ -315,6 +331,24 @@ fn export_events_db(
     })
 }
 
+// 저장된 위젯 목록을 읽어 반환한다 (좌측 사이드바 초기 로드). 파일이 없거나
+// 파싱 실패면 빈 목록.
+#[tauri::command]
+fn get_widgets(app: AppHandle) -> Vec<WidgetData> {
+    widgets_path(&app)
+        .and_then(|p| std::fs::read(&p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+// 위젯 목록을 widgets.json에 pretty JSON으로 저장한다.
+#[tauri::command]
+fn save_widgets(app: AppHandle, widgets: Vec<WidgetData>) -> Result<(), String> {
+    let path = widgets_path(&app).ok_or("app data dir 확보 실패")?;
+    let json = serde_json::to_string_pretty(&widgets).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
 // 체크인 대신 메인 창에서 직접 입력: 메인 창을 띄워 포커스하고, Work view를
 // 활성화하라는 이벤트를 보낸 뒤 체크인 창을 숨긴다.
 #[tauri::command]
@@ -465,7 +499,9 @@ pub fn run() {
             direct_input,
             update_note,
             get_events,
-            export_events_db
+            export_events_db,
+            get_widgets,
+            save_widgets
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

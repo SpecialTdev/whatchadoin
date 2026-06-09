@@ -1,4 +1,5 @@
 import type { Tab } from "../app-view/App";
+import WidgetList from "./WidgetList";
 
 interface Props {
   tab: Tab;
@@ -34,9 +35,7 @@ function LeftSidebar({
 
       <div className="left-sidebar-body">
         {tab === "work" ? (
-          <div className="sidebar-placeholder">
-            <span className="placeholder-text">placeholder</span>
-          </div>
+          <WidgetList />
         ) : (
           <ul className="date-list">
             {dates.map((date) => (

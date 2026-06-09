@@ -167,6 +167,178 @@ body,
   padding-top: 1.5rem;
 }
 
+/* ---------- left sidebar: widget list ---------- */
+.widget-list-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.widget-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.widget-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.widget-item.dragging {
+  opacity: 0.4;
+}
+
+/* 삽입 가이드 선: 대상 위젯의 위(앞) / 마지막 위젯의 아래(끝)에 표시. inset이라 클리핑 안 됨. */
+.widget-item.drop-before {
+  box-shadow: inset 0 3px 0 0 var(--accent);
+}
+
+.widget-item.drop-after {
+  box-shadow: inset 0 -3px 0 0 var(--accent);
+}
+
+/* 종류별 헤더 색을 달리해 순서 변경을 한눈에 확인 (A=accent, B=green). */
+.widget-item[data-widget-type="stub-a"] .widget-header {
+  background: var(--accent-soft);
+}
+
+.widget-item[data-widget-type="stub-b"] .widget-header {
+  background: rgba(46, 204, 113, 0.18);
+}
+
+.widget-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.widget-header:active {
+  cursor: grabbing;
+}
+
+.widget-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.widget-remove {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #ff5f57;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.widget-remove:hover {
+  opacity: 0.7;
+}
+
+.widget-body {
+  padding: 0.6rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.widget-stub {
+  font-style: italic;
+}
+
+.add-widget {
+  padding-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.add-widget-btn {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.add-widget-btn:hover,
+.add-widget-btn.open {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.widget-catalog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.widget-catalog-item {
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.widget-catalog-item:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.widget-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  opacity: 0.95;
+}
+
 .date-list {
   list-style: none;
   margin: 0;
