@@ -5,7 +5,12 @@ import WorkView from "../components/WorkView";
 import ReportView from "../components/ReportView";
 import SettingsView from "../components/SettingsView";
 import { parseMarkdown, serializeBoard, newCard, newColumn } from "../lib/kanban";
-import { fetchEvents, workDayKey, type TrackedEvent } from "../lib/events";
+import {
+  fetchEvents,
+  isReportEvent,
+  workDayKey,
+  type TrackedEvent,
+} from "../lib/events";
 import "./App.css";
 
 export type Tab = "work" | "report" | "settings";
@@ -135,6 +140,20 @@ function App() {
     activeTaskRef.current = activeTask;
   }, [activeTask]);
 
+  // 체크인 주기는 Rust 백그라운드 타이머가 관리한다. 메인 웹뷰가 닫혀도
+  // 최신 후보/활성 작업/주기만 유지되면 checkin 창을 계속 띄울 수 있다.
+  useEffect(() => {
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) =>
+        invoke("update_checkin_context", {
+          tasks,
+          activeTask,
+          intervalSec,
+        }),
+      )
+      .catch((e) => console.error("[App] update_checkin_context failed:", e));
+  }, [tasks, activeTask, intervalSec]);
+
   const handleCheckInSubmit = useCallback((task: string) => {
     setActiveTask(task);
     // 노트에 없던 새 작업이면 실제 todo로 편입
@@ -203,12 +222,6 @@ function App() {
     }
   }, []);
 
-  // Timer: open/show checkin window. 주기가 바뀌면 기존 인터벌 정리 후 재설정.
-  useEffect(() => {
-    const id = setInterval(openCheckIn, intervalSec * 1000);
-    return () => clearInterval(id);
-  }, [openCheckIn, intervalSec]);
-
   // report 탭 진입 시 이벤트를 로드한다 (리포트는 회고용이라 진입 시 새로고침으로 충분).
   useEffect(() => {
     if (tab !== "report") return;
@@ -226,7 +239,9 @@ function App() {
   // 이벤트에서 업무일 목록을 도출 (최신순). 하루 경계 설정을 반영.
   const reportDates = useMemo(() => {
     const set = new Set<string>();
-    for (const ev of reportEvents) set.add(workDayKey(ev.ts, dayBoundaryHour));
+    for (const ev of reportEvents) {
+      if (isReportEvent(ev)) set.add(workDayKey(ev.ts, dayBoundaryHour));
+    }
     return Array.from(set).sort().reverse();
   }, [reportEvents, dayBoundaryHour]);
 
@@ -240,7 +255,11 @@ function App() {
   const reportDayEvents = useMemo(
     () =>
       reportEvents
-        .filter((ev) => workDayKey(ev.ts, dayBoundaryHour) === selectedDate)
+        .filter(
+          (ev) =>
+            isReportEvent(ev) &&
+            workDayKey(ev.ts, dayBoundaryHour) === selectedDate,
+        )
         .sort((a, b) => a.ts - b.ts),
     [reportEvents, dayBoundaryHour, selectedDate],
   );

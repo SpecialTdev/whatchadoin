@@ -1,18 +1,114 @@
-use std::sync::Mutex;
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+#[cfg(desktop)]
+use tauri::{
+    menu::MenuBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+};
 use tauri::{
     AppHandle, Emitter, EventTarget, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_notification::NotificationExt;
 
-#[derive(Default)]
+const MIN_CHECKIN_INTERVAL_SEC: u64 = 60;
+const MAX_CHECKIN_INTERVAL_SEC: u64 = 1800;
+const DEFAULT_CHECKIN_INTERVAL_SEC: u64 = 60;
+#[cfg(desktop)]
+const TRAY_SHOW_ID: &str = "show-main";
+#[cfg(desktop)]
+const TRAY_QUIT_ID: &str = "quit";
+
 struct CheckInState {
     tasks: Vec<String>,
     active_task: Option<String>,
+    interval_sec: u64,
+    next_checkin_at: Instant,
+}
+
+impl Default for CheckInState {
+    fn default() -> Self {
+        Self {
+            tasks: Vec::new(),
+            active_task: None,
+            interval_sec: DEFAULT_CHECKIN_INTERVAL_SEC,
+            next_checkin_at: Instant::now() + Duration::from_secs(DEFAULT_CHECKIN_INTERVAL_SEC),
+        }
+    }
 }
 
 #[derive(serde::Serialize, Clone)]
 struct CheckInData {
     tasks: Vec<String>,
     active_task: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct ExportedDb {
+    path: String,
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+}
+
+#[cfg(desktop)]
+fn setup_main_window_close_handler(app: &AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        let main_for_close = main.clone();
+        main.on_window_event(move |event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = main_for_close.hide();
+            }
+        });
+    } else {
+        println!("[Rust] main window missing, close-to-tray handler skipped");
+    }
+}
+
+#[cfg(desktop)]
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    let menu = MenuBuilder::new(app)
+        .text(TRAY_SHOW_ID, "열기")
+        .separator()
+        .text(TRAY_QUIT_ID, "종료")
+        .build()?;
+
+    let mut tray = TrayIconBuilder::with_id("whatchadoin-tray")
+        .tooltip("Whatchadoin")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_SHOW_ID => show_main_window(app),
+            TRAY_QUIT_ID => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            }
+            | TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => show_main_window(tray.app_handle()),
+            _ => {}
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+
+    tray.build(app)?;
+    Ok(())
 }
 
 // 체크인 창을 숨긴 채로 미리 생성한다. 닫기(X)를 눌러도 destroy되지 않고 hide만 하도록
@@ -37,6 +133,75 @@ fn build_checkin_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+fn send_checkin_notification(app: &AppHandle) {
+    let result = app
+        .notification()
+        .builder()
+        .title("지금 뭐 하고 있어?")
+        .body("체크인 시간이 됐어요. 열린 체크인 창에서 현재 작업을 확인해 주세요.")
+        .sound("Ping")
+        .show();
+
+    if let Err(e) = result {
+        println!("[Rust] checkin notification failed: {}", e);
+    }
+}
+
+fn show_checkin(app: &AppHandle) {
+    let app = app.clone();
+    if let Err(e) = app.clone().run_on_main_thread(move || {
+        // 미리 만들어 둔 창이 없을 경우의 안전장치
+        if app.get_webview_window("checkin").is_none() {
+            println!("[Rust] checkin window missing, building on demand");
+            if let Err(e) = build_checkin_window(&app) {
+                println!("[Rust] failed to build checkin window: {}", e);
+            }
+        }
+
+        if let Some(win) = app.get_webview_window("checkin") {
+            let _ = win.unminimize();
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+        send_checkin_notification(&app);
+
+        // 이미 로드된 웹뷰가 최신 데이터를 다시 가져오게 한다 (stale 방지)
+        let _ = app.emit_to(
+            EventTarget::WebviewWindow {
+                label: "checkin".to_string(),
+            },
+            "checkin://refresh",
+            (),
+        );
+    }) {
+        println!("[Rust] failed to schedule checkin window show: {}", e);
+    }
+}
+
+fn clamp_checkin_interval(interval_sec: u64) -> u64 {
+    interval_sec.clamp(MIN_CHECKIN_INTERVAL_SEC, MAX_CHECKIN_INTERVAL_SEC)
+}
+
+#[tauri::command]
+fn update_checkin_context(
+    state: tauri::State<'_, Mutex<CheckInState>>,
+    tasks: Vec<String>,
+    active_task: Option<String>,
+    interval_sec: u64,
+) {
+    let interval_sec = clamp_checkin_interval(interval_sec);
+    let mut s = state.lock().unwrap();
+    let interval_changed = s.interval_sec != interval_sec;
+
+    s.tasks = tasks;
+    s.active_task = active_task;
+    s.interval_sec = interval_sec;
+
+    if interval_changed {
+        s.next_checkin_at = Instant::now() + Duration::from_secs(interval_sec);
+    }
+}
+
 #[tauri::command]
 fn open_checkin(
     app: AppHandle,
@@ -44,41 +209,26 @@ fn open_checkin(
     tasks: Vec<String>,
     active_task: Option<String>,
 ) {
-    println!("[Rust] open_checkin called, tasks: {:?}, active_task: {:?}", tasks, active_task);
+    println!(
+        "[Rust] open_checkin called, tasks: {:?}, active_task: {:?}",
+        tasks, active_task
+    );
     {
         let mut s = state.lock().unwrap();
         s.tasks = tasks;
         s.active_task = active_task;
     }
 
-    // 미리 만들어 둔 창이 없을 경우의 안전장치
-    if app.get_webview_window("checkin").is_none() {
-        println!("[Rust] checkin window missing, building on demand");
-        if let Err(e) = build_checkin_window(&app) {
-            println!("[Rust] failed to build checkin window: {}", e);
-        }
-    }
-
-    if let Some(win) = app.get_webview_window("checkin") {
-        let _ = win.unminimize();
-        let _ = win.show();
-        let _ = win.set_focus();
-    }
-
-    // 이미 로드된 웹뷰가 최신 데이터를 다시 가져오게 한다 (stale 방지)
-    let _ = app.emit_to(
-        EventTarget::WebviewWindow {
-            label: "checkin".to_string(),
-        },
-        "checkin://refresh",
-        (),
-    );
+    show_checkin(&app);
 }
 
 #[tauri::command]
 fn get_checkin_data(state: tauri::State<'_, Mutex<CheckInState>>) -> CheckInData {
     let s = state.lock().unwrap();
-    println!("[Rust] get_checkin_data called, tasks: {:?}, active_task: {:?}", s.tasks, s.active_task);
+    println!(
+        "[Rust] get_checkin_data called, tasks: {:?}, active_task: {:?}",
+        s.tasks, s.active_task
+    );
     CheckInData {
         tasks: s.tasks.clone(),
         active_task: s.active_task.clone(),
@@ -88,10 +238,19 @@ fn get_checkin_data(state: tauri::State<'_, Mutex<CheckInState>>) -> CheckInData
 #[tauri::command]
 fn submit_checkin(
     app: AppHandle,
+    state: tauri::State<'_, Mutex<CheckInState>>,
     collector: tauri::State<'_, Mutex<collection::Collector>>,
     task: String,
 ) {
     println!("[Rust] submit_checkin called, task: {}", task);
+    {
+        let mut s = state.lock().unwrap();
+        s.active_task = Some(task.clone());
+        if !s.tasks.iter().any(|t| t == &task) {
+            s.tasks.push(task.clone());
+        }
+    }
+
     let result = app.emit_to(
         EventTarget::WebviewWindow {
             label: "main".to_string(),
@@ -123,8 +282,37 @@ fn update_note(collector: tauri::State<'_, Mutex<collection::Collector>>, note: 
 
 /// 저장된 모든 이벤트를 최신순으로 반환한다 (right sidebar 초기 로드).
 #[tauri::command]
-fn get_events(collector: tauri::State<'_, Mutex<collection::Collector>>) -> Vec<core_shared::Event> {
+fn get_events(
+    collector: tauri::State<'_, Mutex<collection::Collector>>,
+) -> Vec<core_shared::Event> {
     collector.lock().unwrap().all_events()
+}
+
+#[tauri::command]
+fn export_events_db(
+    app: AppHandle,
+    collector: tauri::State<'_, Mutex<collection::Collector>>,
+    privacy_level: Option<u8>,
+) -> Result<ExportedDb, String> {
+    let privacy_level = collection::ExportPrivacyLevel::from_step(privacy_level.unwrap_or(1))
+        .ok_or_else(|| "지원하지 않는 DB 내보내기 단계입니다.".to_string())?;
+    let downloads = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("다운로드 폴더를 찾지 못했습니다: {e}"))?;
+    std::fs::create_dir_all(&downloads)
+        .map_err(|e| format!("다운로드 폴더를 만들지 못했습니다: {e}"))?;
+
+    let dest = unique_export_path(&downloads, privacy_level);
+    collector
+        .lock()
+        .unwrap()
+        .export_to(&dest, privacy_level)
+        .map_err(|e| format!("DB 내보내기에 실패했습니다: {e}"))?;
+
+    Ok(ExportedDb {
+        path: dest.display().to_string(),
+    })
 }
 
 // 체크인 대신 메인 창에서 직접 입력: 메인 창을 띄워 포커스하고, Work view를
@@ -132,11 +320,7 @@ fn get_events(collector: tauri::State<'_, Mutex<collection::Collector>>) -> Vec<
 #[tauri::command]
 fn direct_input(app: AppHandle) {
     println!("[Rust] direct_input called");
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.unminimize();
-        let _ = main.show();
-        let _ = main.set_focus();
-    }
+    show_main_window(&app);
     let _ = app.emit_to(
         EventTarget::WebviewWindow {
             label: "main".to_string(),
@@ -149,6 +333,21 @@ fn direct_input(app: AppHandle) {
     }
 }
 
+fn unique_export_path(dir: &Path, privacy_level: collection::ExportPrivacyLevel) -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let base = format!("whatchadoin-events-{}-{stamp}", privacy_level.file_suffix());
+    let mut dest = dir.join(format!("{base}.db"));
+    let mut n = 1;
+    while dest.exists() {
+        dest = dir.join(format!("{base}-{n}.db"));
+        n += 1;
+    }
+    dest
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 조립기(tauri-main): 처리 엔진을 생성해 app-service에 주입한다.
@@ -159,6 +358,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(Mutex::new(CheckInState::default()))
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // 이벤트 수집기: app data dir의 SQLite에 영속한다.
@@ -167,6 +367,14 @@ pub fn run() {
             let db_path = dir.join("events.db");
             let collector = collection::Collector::open(&db_path).expect("events DB 열기 실패");
             app.manage(Mutex::new(collector));
+
+            #[cfg(desktop)]
+            {
+                setup_main_window_close_handler(app.handle());
+                if let Err(e) = build_tray(app.handle()) {
+                    println!("[Rust] failed to build tray icon: {}", e);
+                }
+            }
 
             // 15s마다 note 변경을 diff해 이벤트로 기록하고 main 창에 push한다.
             let handle = app.handle().clone();
@@ -192,19 +400,72 @@ pub fn run() {
                 }
             });
 
+            // 포커스된 최상위 윈도우(앱·제목) 변화를 수집해 main 창 Events에 push한다.
+            let focus_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let mut tracker = collection::WindowTracker::default();
+                loop {
+                    if let Some(focus_event) = tracker.poll() {
+                        println!("[Rust] focus changed → {}", focus_event.text());
+                        let event = {
+                            let state = focus_handle.state::<Mutex<collection::Collector>>();
+                            let mut c = state.lock().unwrap();
+                            c.record_focus_event(&focus_event)
+                        };
+                        if let Some(ev) = event {
+                            let _ = focus_handle.emit_to(
+                                EventTarget::WebviewWindow {
+                                    label: "main".to_string(),
+                                },
+                                "events://new",
+                                ev,
+                            );
+                        }
+                    }
+
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+            });
+
             // 체크인 창을 시작 시 숨긴 채로 미리 만들어 둔다 (open 시 즉시 show만 하도록).
             if let Err(e) = build_checkin_window(app.handle()) {
                 println!("[Rust] failed to pre-build checkin window: {}", e);
             }
+
+            // 체크인 주기는 Rust에서 관리한다. 메인 웹뷰가 닫혀도 앱 프로세스가
+            // 살아있는 동안 checkin 창과 알림을 계속 띄울 수 있게 한다.
+            let checkin_handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(1));
+
+                let should_open = {
+                    let state = checkin_handle.state::<Mutex<CheckInState>>();
+                    let mut s = state.lock().unwrap();
+                    let now = Instant::now();
+                    if now < s.next_checkin_at {
+                        false
+                    } else {
+                        s.next_checkin_at = now + Duration::from_secs(s.interval_sec);
+                        true
+                    }
+                };
+
+                if should_open {
+                    println!("[Rust] checkin timer tick");
+                    show_checkin(&checkin_handle);
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             open_checkin,
+            update_checkin_context,
             get_checkin_data,
             submit_checkin,
             direct_input,
             update_note,
-            get_events
+            get_events,
+            export_events_db
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
