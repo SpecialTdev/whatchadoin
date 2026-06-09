@@ -3,6 +3,11 @@ use std::{
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+#[cfg(desktop)]
+use tauri::{
+    menu::MenuBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+};
 use tauri::{
     AppHandle, Emitter, EventTarget, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
@@ -11,6 +16,10 @@ use tauri_plugin_notification::NotificationExt;
 const MIN_CHECKIN_INTERVAL_SEC: u64 = 60;
 const MAX_CHECKIN_INTERVAL_SEC: u64 = 1800;
 const DEFAULT_CHECKIN_INTERVAL_SEC: u64 = 60;
+#[cfg(desktop)]
+const TRAY_SHOW_ID: &str = "show-main";
+#[cfg(desktop)]
+const TRAY_QUIT_ID: &str = "quit";
 
 struct CheckInState {
     tasks: Vec<String>,
@@ -39,6 +48,67 @@ struct CheckInData {
 #[derive(serde::Serialize)]
 struct ExportedDb {
     path: String,
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+}
+
+#[cfg(desktop)]
+fn setup_main_window_close_handler(app: &AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        let main_for_close = main.clone();
+        main.on_window_event(move |event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = main_for_close.hide();
+            }
+        });
+    } else {
+        println!("[Rust] main window missing, close-to-tray handler skipped");
+    }
+}
+
+#[cfg(desktop)]
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    let menu = MenuBuilder::new(app)
+        .text(TRAY_SHOW_ID, "열기")
+        .separator()
+        .text(TRAY_QUIT_ID, "종료")
+        .build()?;
+
+    let mut tray = TrayIconBuilder::with_id("whatchadoin-tray")
+        .tooltip("Whatchadoin")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_SHOW_ID => show_main_window(app),
+            TRAY_QUIT_ID => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            }
+            | TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => show_main_window(tray.app_handle()),
+            _ => {}
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+
+    tray.build(app)?;
+    Ok(())
 }
 
 // 체크인 창을 숨긴 채로 미리 생성한다. 닫기(X)를 눌러도 destroy되지 않고 hide만 하도록
@@ -250,11 +320,7 @@ fn export_events_db(
 #[tauri::command]
 fn direct_input(app: AppHandle) {
     println!("[Rust] direct_input called");
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.unminimize();
-        let _ = main.show();
-        let _ = main.set_focus();
-    }
+    show_main_window(&app);
     let _ = app.emit_to(
         EventTarget::WebviewWindow {
             label: "main".to_string(),
@@ -301,6 +367,14 @@ pub fn run() {
             let db_path = dir.join("events.db");
             let collector = collection::Collector::open(&db_path).expect("events DB 열기 실패");
             app.manage(Mutex::new(collector));
+
+            #[cfg(desktop)]
+            {
+                setup_main_window_close_handler(app.handle());
+                if let Err(e) = build_tray(app.handle()) {
+                    println!("[Rust] failed to build tray icon: {}", e);
+                }
+            }
 
             // 15s마다 note 변경을 diff해 이벤트로 기록하고 main 창에 push한다.
             let handle = app.handle().clone();

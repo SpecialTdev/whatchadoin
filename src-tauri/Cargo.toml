@@ -28,7 +28,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -39,4 +39,3 @@ processing = { path = "crates/processing" }
 collection = { path = "crates/collection" }
 core-shared = { path = "crates/core-shared" }
 tauri-plugin-notification = "2.3.3"
-
