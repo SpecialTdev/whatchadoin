@@ -110,6 +110,20 @@ function App() {
   // 리포트용 이벤트 목록 (report 탭 진입 시 Rust에서 로드).
   const [reportEvents, setReportEvents] = useState<TrackedEvent[]>([]);
 
+  // 시작 시 OS 알림 권한을 확보한다 (없으면 체크인·타이머 알림이 조용히 무시됨).
+  useEffect(() => {
+    (async () => {
+      try {
+        const { isPermissionGranted, requestPermission } = await import(
+          "@tauri-apps/plugin-notification"
+        );
+        if (!(await isPermissionGranted())) await requestPermission();
+      } catch (e) {
+        console.error("[App] notification permission failed:", e);
+      }
+    })();
+  }, []);
+
   const handleIntervalChange = useCallback((sec: number) => {
     setIntervalSec(sec);
     try {

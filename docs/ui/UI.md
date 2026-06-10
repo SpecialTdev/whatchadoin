@@ -19,7 +19,7 @@ todo는 자유형 markdown note(WYSIWYG markdown 에디터)로 작성하고, 같
 ![alt text](docs/res/image-report.png)
 
 left 사이드바에 work / report를 선택할 수 있도록.
- - work 선택 시 placeholder / report 선택 시 하루 단위의 report 목록 조회 가능.
+ - work 선택 시 위젯 목록(→ [left-sidebar.md](left-sidebar.md)) / report 선택 시 하루 단위의 report 목록 조회 가능.
  - report 목록 = 실제 events가 있는 업무일(최신순, 하루 경계 새벽 5시 기준). 선택 시 그날 리포트를 표출한다.
    - **집중 타임라인(Gantt)**: task별 집중 구간 막대(체크인 기반). 막대 사이 빈 구간 = 추적 공백(집중 분절).
    - **노트 활동 트랙**: 노트 변경(추가/완료/삭제)을 색 틱으로 표시. **Insights**: 활동 구간·이벤트 수·체크인 등 요약(계산형).

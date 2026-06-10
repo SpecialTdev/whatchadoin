@@ -167,6 +167,482 @@ body,
   padding-top: 1.5rem;
 }
 
+/* ---------- left sidebar: widget list ---------- */
+/* 위젯 목록 컨테이너. 탭 전환에도 타이머가 살아있도록 항상 마운트하고, Work 탭이
+   아닐 때만 숨긴다(언마운트 X). */
+.widget-host {
+  height: 100%;
+}
+
+.widget-host.hidden {
+  display: none;
+}
+
+.widget-list-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.widget-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.widget-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.widget-item.dragging {
+  opacity: 0.4;
+}
+
+/* 삽입 가이드 선: 대상 위젯의 위(앞) / 마지막 위젯의 아래(끝)에 표시. inset이라 클리핑 안 됨. */
+.widget-item.drop-before {
+  box-shadow: inset 0 3px 0 0 var(--accent);
+}
+
+.widget-item.drop-after {
+  box-shadow: inset 0 -3px 0 0 var(--accent);
+}
+
+.widget-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.widget-header:active {
+  cursor: grabbing;
+}
+
+.widget-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.widget-remove {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #ff5f57;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.widget-remove:hover {
+  opacity: 0.7;
+}
+
+.widget-body {
+  padding: 0.6rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* ---------- basic-timer 위젯 ---------- */
+.widget-timer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.widget-timer-time {
+  text-align: center;
+  font-size: 1.15rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.widget-timer-time.done {
+  color: #e74c3c;
+}
+
+.widget-timer-edit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+}
+
+.widget-timer-input {
+  width: 2.4rem;
+  padding: 0.2rem 0.1rem;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.widget-timer-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.widget-timer-input::-webkit-inner-spin-button,
+.widget-timer-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.widget-timer-colon {
+  color: var(--text-muted);
+}
+
+.widget-timer-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.widget-timer-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s linear;
+}
+
+.widget-timer-controls {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.widget-timer-btn {
+  flex: 1;
+  padding: 0.35rem 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.widget-timer-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.widget-timer-btn.primary {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.widget-timer-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------- 척추요정(posture-check) 위젯 ---------- */
+/* 좌: 작은 1:1 썸네일 / 우: 슬라이더 → 진행바 → 버튼 세로 배치. */
+.widget-posture {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.posture-thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 6px;
+  background: #000;
+}
+
+.posture-controls {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.posture-interval {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.posture-interval-label {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.posture-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.posture-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.posture-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s linear;
+}
+
+.posture-btn {
+  padding: 0.4rem 0;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.posture-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ---------- 뽀모도로 타이머(ppomodoro-timer) 위젯 ---------- */
+.widget-pomodoro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ppomo-modes {
+  display: flex;
+  gap: 0.3rem;
+  width: 100%;
+}
+
+.ppomo-mode {
+  flex: 1;
+  padding: 0.3rem 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.ppomo-mode.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 원형 카운트다운 인디케이터(도넛): 바깥 원은 conic-gradient로 남은 비율 표시. */
+.ppomo-dial {
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ppomo-face {
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ppomo-time {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.ppomo-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.ppomo-input {
+  width: 1.9rem;
+  padding: 0.1rem 0;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.ppomo-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.ppomo-input::-webkit-inner-spin-button,
+.ppomo-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.ppomo-colon {
+  color: var(--text-muted);
+}
+
+.ppomo-controls {
+  display: flex;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.ppomo-btn {
+  flex: 1;
+  padding: 0.35rem 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.ppomo-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.ppomo-btn.primary {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ppomo-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.add-widget {
+  padding-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.add-widget-btn {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.add-widget-btn:hover,
+.add-widget-btn.open {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.widget-catalog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.widget-catalog-item {
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.widget-catalog-item:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.widget-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  opacity: 0.95;
+}
+
 .date-list {
   list-style: none;
   margin: 0;
