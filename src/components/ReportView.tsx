@@ -19,9 +19,10 @@ const TASK_PALETTE = [
   "#f1c40f",
 ];
 
-// 체크인 텍스트 "체크인 — 'TASK' 작업 중"에서 TASK를 뽑는다.
+// 체크인 텍스트 첫 줄 "체크인 — 'TASK' 작업 중"에서 TASK를 뽑는다.
 function checkinTask(text: string): string | null {
-  const m = text.match(/^체크인 — '(.*)' 작업 중$/);
+  const firstLine = text.split("\n", 1)[0];
+  const m = firstLine.match(/^체크인 — '(.*)' 작업 중$/);
   return m ? m[1] : null;
 }
 

@@ -1136,39 +1136,140 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- debug ---------- */
-.debug-checkin-btn {
+/* ---------- work session controls ---------- */
+.work-session-controls {
   position: fixed;
   bottom: 1rem;
-  right: 1rem;
-  padding: 0.4rem 0.75rem;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
+  right: calc(200px + 1rem);
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: min(520px, calc(100vw - 2rem));
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   background: var(--surface);
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  cursor: pointer;
-  opacity: 0.6;
+  box-shadow: 0 8px 24px rgba(15, 15, 15, 0.12);
   z-index: 50;
 }
 
-.debug-checkin-btn:hover {
-  opacity: 1;
-  border-color: var(--accent);
+.work-session-label {
+  min-width: 0;
+  max-width: 260px;
+  padding: 0 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.work-session-controls.working .work-session-label {
   color: var(--accent);
 }
 
+.work-session-controls.break .work-session-label {
+  color: #0f7a45;
+}
+
+.work-session-btn {
+  min-height: 32px;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.work-session-btn:hover {
+  border-color: var(--accent);
+}
+
+.work-session-btn.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.work-session-btn.danger {
+  border-color: #d84b3f;
+  color: #b3261e;
+}
+
 /* ---------- check-in window ---------- */
+.checkin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex: 0 0 auto;
+}
+
 .checkin-title {
   margin: 0;
   font-size: 1rem;
   font-weight: 600;
 }
 
+.checkin-status-pill {
+  flex: 0 0 auto;
+  padding: 0.18rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.checkin-status-pill.working {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.checkin-status-pill.break {
+  border-color: rgba(46, 204, 113, 0.45);
+  background: rgba(46, 204, 113, 0.12);
+  color: #0f7a45;
+}
+
+.checkin-status-pill.off {
+  background: var(--surface-2);
+}
+
+.checkin-state-window {
+  justify-content: center;
+}
+
+.checkin-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.checkin-empty-state strong {
+  color: var(--text);
+}
+
 .checkin-task-list {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  flex: 0 0 auto;
+  max-height: 8.5rem;
+  overflow-y: auto;
+  padding-right: 0.15rem;
 }
 
 .checkin-task-btn {
@@ -1211,8 +1312,145 @@ body,
   border-color: var(--accent);
 }
 
+.checkin-memo-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.checkin-memo-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.checkin-memo-pane.preview {
+  background: #fbfbfb;
+}
+
+.checkin-memo-label {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.checkin-memo-editor {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 0.7rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.markdown-preview {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.7rem;
+  color: var(--text);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.markdown-preview h1,
+.markdown-preview h2,
+.markdown-preview h3,
+.markdown-preview p,
+.markdown-preview ul,
+.markdown-preview blockquote,
+.markdown-preview pre {
+  margin-top: 0;
+}
+
+.markdown-preview h1 {
+  font-size: 1.05rem;
+  margin-bottom: 0.5rem;
+}
+
+.markdown-preview h2 {
+  font-size: 0.95rem;
+  margin-bottom: 0.45rem;
+}
+
+.markdown-preview h3 {
+  font-size: 0.88rem;
+  margin-bottom: 0.4rem;
+}
+
+.markdown-preview p,
+.markdown-preview li {
+  font-size: 0.85rem;
+}
+
+.markdown-preview ul {
+  padding-left: 1.25rem;
+}
+
+.markdown-preview blockquote {
+  padding-left: 0.7rem;
+  border-left: 3px solid var(--border);
+  color: var(--text-muted);
+}
+
+.markdown-preview pre {
+  overflow-x: auto;
+  padding: 0.55rem;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 0.78rem;
+}
+
+.markdown-preview code {
+  padding: 0.08rem 0.22rem;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82em;
+}
+
+.markdown-preview pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.markdown-check-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  list-style: none;
+}
+
+.markdown-check-item input {
+  margin-top: 0.25rem;
+}
+
+.markdown-empty {
+  color: var(--text-muted);
+}
+
 .checkin-actions {
   display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 0.5rem;
   justify-content: flex-end;
 }
@@ -1231,6 +1469,23 @@ body,
 
 .checkin-new-btn:hover {
   border-color: var(--accent);
+}
+
+.checkin-break-btn {
+  padding: 0.55rem 1rem;
+  border: 1px solid rgba(46, 204, 113, 0.55);
+  border-radius: 6px;
+  background: rgba(46, 204, 113, 0.1);
+  color: #0f7a45;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.checkin-break-btn:hover {
+  border-color: #2ecc71;
+  background: rgba(46, 204, 113, 0.16);
 }
 
 .checkin-submit-btn {
@@ -1267,6 +1522,22 @@ body,
 
 .checkin-direct-btn:hover {
   color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .work-session-controls {
+    left: 1rem;
+    right: 1rem;
+    justify-content: flex-end;
+  }
+
+  .work-session-label {
+    margin-right: auto;
+  }
+
+  .checkin-memo-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ---------- workspace mode switch ---------- */
