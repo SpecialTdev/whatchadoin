@@ -106,8 +106,12 @@ impl Collector {
     }
 
     /// 체크인 응답을 즉시 이벤트로 기록한다.
-    pub fn record_checkin(&mut self, task: &str) -> Option<Event> {
-        let text = format!("체크인 — '{}' 작업 중", task);
+    pub fn record_checkin(&mut self, task: &str, memo: Option<&str>) -> Option<Event> {
+        let mut text = format!("체크인 — '{}' 작업 중", task);
+        if let Some(memo) = memo.map(str::trim).filter(|m| !m.is_empty()) {
+            text.push_str("\n\n");
+            text.push_str(memo);
+        }
         self.insert(EventKind::Checkin, &text).ok()
     }
 
@@ -497,10 +501,11 @@ fn obfuscate_task_event_text(text: &str, task_aliases: &mut HashMap<String, Stri
         return text.to_string();
     }
 
-    let Some(start) = text.find('\'') else {
+    let first_line = text.lines().next().unwrap_or(text);
+    let Some(start) = first_line.find('\'') else {
         return text.to_string();
     };
-    let Some(end) = text.rfind('\'') else {
+    let Some(end) = first_line.rfind('\'') else {
         return text.to_string();
     };
     if start >= end {
@@ -680,7 +685,7 @@ mod tests {
         let _ = std::fs::remove_file(&export_path);
 
         let mut collector = Collector::open(&db_path).unwrap();
-        collector.record_checkin("DB export");
+        collector.record_checkin("DB export", None);
         collector
             .export_to(&export_path, ExportPrivacyLevel::RawData)
             .unwrap();
@@ -694,6 +699,25 @@ mod tests {
         drop(collector);
         let _ = std::fs::remove_file(db_path);
         let _ = std::fs::remove_file(export_path);
+    }
+
+    #[test]
+    fn record_checkin_keeps_markdown_memo() {
+        let (db_path, _) = temp_db_paths("checkin-memo");
+        let _ = std::fs::remove_file(&db_path);
+
+        let mut collector = Collector::open(&db_path).unwrap();
+        collector.record_checkin("Write PR", Some("## 메모\n- [x] context"));
+
+        let events = collector.all_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].text,
+            "체크인 — 'Write PR' 작업 중\n\n## 메모\n- [x] context"
+        );
+
+        drop(collector);
+        let _ = std::fs::remove_file(db_path);
     }
 
     #[test]
@@ -784,7 +808,7 @@ mod tests {
         let _ = std::fs::remove_file(&export_path);
 
         let mut collector = Collector::open(&db_path).unwrap();
-        collector.record_checkin("Review DB export");
+        collector.record_checkin("Review DB export", None);
         collector
             .insert(EventKind::Note, "할 일 추가 — 'Review DB export'")
             .unwrap();

@@ -21,11 +21,20 @@ const TRAY_SHOW_ID: &str = "show-main";
 #[cfg(desktop)]
 const TRAY_QUIT_ID: &str = "quit";
 
+#[derive(serde::Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum CheckInMode {
+    Off,
+    Working,
+    Break,
+}
+
 struct CheckInState {
     tasks: Vec<String>,
     active_task: Option<String>,
     interval_sec: u64,
     next_checkin_at: Instant,
+    mode: CheckInMode,
 }
 
 impl Default for CheckInState {
@@ -35,6 +44,7 @@ impl Default for CheckInState {
             active_task: None,
             interval_sec: DEFAULT_CHECKIN_INTERVAL_SEC,
             next_checkin_at: Instant::now() + Duration::from_secs(DEFAULT_CHECKIN_INTERVAL_SEC),
+            mode: CheckInMode::Off,
         }
     }
 }
@@ -43,6 +53,19 @@ impl Default for CheckInState {
 struct CheckInData {
     tasks: Vec<String>,
     active_task: Option<String>,
+    mode: CheckInMode,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct CheckInStatus {
+    active_task: Option<String>,
+    mode: CheckInMode,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct CheckInSubmitEvent {
+    task: String,
+    memo: String,
 }
 
 #[derive(serde::Serialize)]
@@ -135,10 +158,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 fn build_checkin_window(app: &AppHandle) -> tauri::Result<()> {
     let win = WebviewWindowBuilder::new(app, "checkin", WebviewUrl::App(Default::default()))
         .title("지금 뭐 하고 있어?")
-        .inner_size(360.0, 400.0)
+        .inner_size(760.0, 560.0)
+        .min_inner_size(520.0, 420.0)
         .center()
         .always_on_top(true)
-        .resizable(false)
+        .resizable(true)
         .visible(false)
         .build()?;
 
@@ -201,6 +225,25 @@ fn clamp_checkin_interval(interval_sec: u64) -> u64 {
     interval_sec.clamp(MIN_CHECKIN_INTERVAL_SEC, MAX_CHECKIN_INTERVAL_SEC)
 }
 
+fn checkin_status(s: &CheckInState) -> CheckInStatus {
+    CheckInStatus {
+        active_task: s.active_task.clone(),
+        mode: s.mode,
+    }
+}
+
+fn emit_checkin_status(app: &AppHandle, status: CheckInStatus) {
+    for label in ["main", "checkin"] {
+        let _ = app.emit_to(
+            EventTarget::WebviewWindow {
+                label: label.to_string(),
+            },
+            "checkin://status",
+            status.clone(),
+        );
+    }
+}
+
 #[tauri::command]
 fn update_checkin_context(
     state: tauri::State<'_, Mutex<CheckInState>>,
@@ -216,7 +259,7 @@ fn update_checkin_context(
     s.active_task = active_task;
     s.interval_sec = interval_sec;
 
-    if interval_changed {
+    if interval_changed && s.mode == CheckInMode::Working {
         s.next_checkin_at = Instant::now() + Duration::from_secs(interval_sec);
     }
 }
@@ -251,7 +294,68 @@ fn get_checkin_data(state: tauri::State<'_, Mutex<CheckInState>>) -> CheckInData
     CheckInData {
         tasks: s.tasks.clone(),
         active_task: s.active_task.clone(),
+        mode: s.mode,
     }
+}
+
+#[tauri::command]
+fn get_checkin_status(state: tauri::State<'_, Mutex<CheckInState>>) -> CheckInStatus {
+    let s = state.lock().unwrap();
+    checkin_status(&s)
+}
+
+#[tauri::command]
+fn clock_in(app: AppHandle, state: tauri::State<'_, Mutex<CheckInState>>) -> CheckInStatus {
+    let status = {
+        let mut s = state.lock().unwrap();
+        s.mode = CheckInMode::Working;
+        s.next_checkin_at = Instant::now() + Duration::from_secs(s.interval_sec);
+        checkin_status(&s)
+    };
+    emit_checkin_status(&app, status.clone());
+    status
+}
+
+#[tauri::command]
+fn clock_out(app: AppHandle, state: tauri::State<'_, Mutex<CheckInState>>) -> CheckInStatus {
+    let status = {
+        let mut s = state.lock().unwrap();
+        s.mode = CheckInMode::Off;
+        s.active_task = None;
+        checkin_status(&s)
+    };
+    emit_checkin_status(&app, status.clone());
+    if let Some(checkin) = app.get_webview_window("checkin") {
+        let _ = checkin.hide();
+    }
+    status
+}
+
+#[tauri::command]
+fn start_break(app: AppHandle, state: tauri::State<'_, Mutex<CheckInState>>) -> CheckInStatus {
+    let status = {
+        let mut s = state.lock().unwrap();
+        s.mode = CheckInMode::Break;
+        s.active_task = None;
+        checkin_status(&s)
+    };
+    emit_checkin_status(&app, status.clone());
+    if let Some(checkin) = app.get_webview_window("checkin") {
+        let _ = checkin.hide();
+    }
+    status
+}
+
+#[tauri::command]
+fn end_break(app: AppHandle, state: tauri::State<'_, Mutex<CheckInState>>) -> CheckInStatus {
+    let status = {
+        let mut s = state.lock().unwrap();
+        s.mode = CheckInMode::Working;
+        s.next_checkin_at = Instant::now() + Duration::from_secs(s.interval_sec);
+        checkin_status(&s)
+    };
+    emit_checkin_status(&app, status.clone());
+    status
 }
 
 #[tauri::command]
@@ -260,27 +364,37 @@ fn submit_checkin(
     state: tauri::State<'_, Mutex<CheckInState>>,
     collector: tauri::State<'_, Mutex<collection::Collector>>,
     task: String,
+    memo: Option<String>,
 ) {
+    let memo = memo.unwrap_or_default();
     println!("[Rust] submit_checkin called, task: {}", task);
-    {
+    let status = {
         let mut s = state.lock().unwrap();
         s.active_task = Some(task.clone());
         if !s.tasks.iter().any(|t| t == &task) {
             s.tasks.push(task.clone());
         }
-    }
+        if s.mode == CheckInMode::Working {
+            s.next_checkin_at = Instant::now() + Duration::from_secs(s.interval_sec);
+        }
+        checkin_status(&s)
+    };
 
     let result = app.emit_to(
         EventTarget::WebviewWindow {
             label: "main".to_string(),
         },
         "checkin://submit",
-        task.clone(),
+        CheckInSubmitEvent {
+            task: task.clone(),
+            memo: memo.clone(),
+        },
     );
     println!("[Rust] emit_to result: {:?}", result);
+    emit_checkin_status(&app, status);
 
     // 체크인 응답을 이벤트로 기록하고 right sidebar에 즉시 반영한다.
-    let event = collector.lock().unwrap().record_checkin(&task);
+    let event = collector.lock().unwrap().record_checkin(&task, Some(&memo));
     if let Some(ev) = event {
         let _ = app.emit_to(
             EventTarget::WebviewWindow {
@@ -494,7 +608,7 @@ pub fn run() {
                     let state = checkin_handle.state::<Mutex<CheckInState>>();
                     let mut s = state.lock().unwrap();
                     let now = Instant::now();
-                    if now < s.next_checkin_at {
+                    if s.mode != CheckInMode::Working || now < s.next_checkin_at {
                         false
                     } else {
                         s.next_checkin_at = now + Duration::from_secs(s.interval_sec);
@@ -513,6 +627,11 @@ pub fn run() {
             open_checkin,
             update_checkin_context,
             get_checkin_data,
+            get_checkin_status,
+            clock_in,
+            clock_out,
+            start_break,
+            end_break,
             submit_checkin,
             direct_input,
             update_note,

@@ -11,6 +11,11 @@ import {
   workDayKey,
   type TrackedEvent,
 } from "../lib/events";
+import type {
+  CheckInMode,
+  CheckInStatus,
+  CheckInSubmitEvent,
+} from "../lib/checkin";
 import "./App.css";
 
 export type Tab = "work" | "report" | "settings";
@@ -99,6 +104,7 @@ function App() {
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [note, setNote] = useState<string>(SAMPLE_NOTE);
   const [activeTask, setActiveTask] = useState<string | null>(null);
+  const [checkInMode, setCheckInMode] = useState<CheckInMode>("off");
   // 체크인의 '직접 입력' → Work view 활성화 신호 (값이 바뀌면 노트 에디터 포커스)
   const [noteFocusNonce, setNoteFocusNonce] = useState(0);
   // 체크인 팝업 주기(초). 슬라이더로 조절, localStorage에 유지.
@@ -154,6 +160,11 @@ function App() {
     activeTaskRef.current = activeTask;
   }, [activeTask]);
 
+  const applyCheckInStatus = useCallback((status: CheckInStatus) => {
+    setCheckInMode(status.mode);
+    setActiveTask(status.active_task);
+  }, []);
+
   // 체크인 주기는 Rust 백그라운드 타이머가 관리한다. 메인 웹뷰가 닫혀도
   // 최신 후보/활성 작업/주기만 유지되면 checkin 창을 계속 띄울 수 있다.
   useEffect(() => {
@@ -173,6 +184,13 @@ function App() {
     // 노트에 없던 새 작업이면 실제 todo로 편입
     setNote((prev) => (deriveTasks(prev).includes(task) ? prev : appendTask(prev, task)));
   }, []);
+
+  useEffect(() => {
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke<CheckInStatus>("get_checkin_status"))
+      .then(applyCheckInStatus)
+      .catch((e) => console.error("[App] get_checkin_status failed:", e));
+  }, [applyCheckInStatus]);
 
   // note 변경을 Rust 수집기에 push한다 (백그라운드 15s diff의 입력). 추적/이벤트
   // 기록은 Rust collection crate가 담당하고, 여기선 최신 스냅샷만 넘긴다.
@@ -197,9 +215,16 @@ function App() {
         };
 
         register(
-          await listen<string>("checkin://submit", (event) => {
+          await listen<CheckInSubmitEvent>("checkin://submit", (event) => {
             console.log("[App] received checkin://submit, payload:", event.payload);
-            handleCheckInSubmit(event.payload);
+            handleCheckInSubmit(event.payload.task);
+          }),
+        );
+
+        register(
+          await listen<CheckInStatus>("checkin://status", (event) => {
+            console.log("[App] received checkin://status, payload:", event.payload);
+            applyCheckInStatus(event.payload);
           }),
         );
 
@@ -220,7 +245,7 @@ function App() {
       cancelled = true;
       unlisteners.forEach((un) => un());
     };
-  }, [handleCheckInSubmit]);
+  }, [applyCheckInStatus, handleCheckInSubmit]);
 
   const openCheckIn = useCallback(async () => {
     try {
@@ -235,6 +260,28 @@ function App() {
       console.error("[App] open_checkin error:", e);
     }
   }, []);
+
+  const runCheckInStatusCommand = useCallback(
+    async (command: "clock_in" | "clock_out" | "end_break") => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const status = await invoke<CheckInStatus>(command);
+        applyCheckInStatus(status);
+      } catch (e) {
+        console.error(`[App] ${command} failed:`, e);
+      }
+    },
+    [applyCheckInStatus],
+  );
+
+  const sessionLabel =
+    checkInMode === "off"
+      ? "퇴근 상태"
+      : checkInMode === "break"
+        ? "휴식 중"
+        : activeTask
+          ? `근무 중 · ${activeTask}`
+          : "근무 중";
 
   // report 탭 진입 시 이벤트를 로드한다 (리포트는 회고용이라 진입 시 새로고침으로 충분).
   useEffect(() => {
@@ -319,9 +366,45 @@ function App() {
 
       <RightSidebar />
 
-      <button className="debug-checkin-btn" onClick={openCheckIn}>
-        체크인
-      </button>
+      <div className={`work-session-controls ${checkInMode}`}>
+        <span className="work-session-label">{sessionLabel}</span>
+        {checkInMode === "off" ? (
+          <button
+            className="work-session-btn primary"
+            type="button"
+            onClick={() => runCheckInStatusCommand("clock_in")}
+          >
+            출근
+          </button>
+        ) : (
+          <>
+            {checkInMode === "break" ? (
+              <button
+                className="work-session-btn primary"
+                type="button"
+                onClick={() => runCheckInStatusCommand("end_break")}
+              >
+                휴식 종료
+              </button>
+            ) : (
+              <button
+                className="work-session-btn"
+                type="button"
+                onClick={openCheckIn}
+              >
+                체크인
+              </button>
+            )}
+            <button
+              className="work-session-btn danger"
+              type="button"
+              onClick={() => runCheckInStatusCommand("clock_out")}
+            >
+              퇴근
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
