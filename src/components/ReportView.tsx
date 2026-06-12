@@ -1,4 +1,10 @@
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import {
+  checkInMemoPoints,
+  type CheckInMemoPoint,
+} from "../lib/checkinMemo";
 import { calendarDate, formatTime, type TrackedEvent } from "../lib/events";
+import { renderMarkdown } from "../lib/markdown";
 
 interface Props {
   date: string;
@@ -18,13 +24,6 @@ const TASK_PALETTE = [
   "#1abc9c",
   "#f1c40f",
 ];
-
-// 체크인 텍스트 첫 줄 "체크인 — 'TASK' 작업 중"에서 TASK를 뽑는다.
-function checkinTask(text: string): string | null {
-  const firstLine = text.split("\n", 1)[0];
-  const m = firstLine.match(/^체크인 — '(.*)' 작업 중$/);
-  return m ? m[1] : null;
-}
 
 // 노트 이벤트 종류별 색상 (활동 트랙 틱).
 function noteColor(text: string): string {
@@ -50,6 +49,10 @@ interface Row {
   task: string;
   color: string;
   segments: Segment[];
+}
+interface MemoPopup {
+  task: string;
+  time: number;
 }
 
 // 체크인들 → task별 집중 구간(Row). 각 체크인은 [ts, min(다음 체크인, ts+cap)) 동안
@@ -84,7 +87,31 @@ function buildRows(
   }));
 }
 
+function memoAtTime(
+  points: CheckInMemoPoint[],
+  task: string,
+  time: number,
+): CheckInMemoPoint | null {
+  let selected: CheckInMemoPoint | null = null;
+  for (const point of points) {
+    if (point.task === task && point.ts <= time) selected = point;
+  }
+  return selected;
+}
+
 function ReportView({ date, events, checkinIntervalSec }: Props) {
+  const [memoPopup, setMemoPopup] = useState<MemoPopup | null>(null);
+  const memoPoints = useMemo(() => checkInMemoPoints(events), [events]);
+  const noteEvents = useMemo(() => events.filter((e) => e.kind === "note"), [events]);
+  const checkins = useMemo(
+    () => memoPoints.map((point) => ({ ts: point.ts, task: point.task })),
+    [memoPoints],
+  );
+
+  useEffect(() => {
+    setMemoPopup(null);
+  }, [date]);
+
   if (!date || events.length === 0) {
     return (
       <div className="report-view">
@@ -101,11 +128,6 @@ function ReportView({ date, events, checkinIntervalSec }: Props) {
       </div>
     );
   }
-
-  const noteEvents = events.filter((e) => e.kind === "note");
-  const checkins = events
-    .map((e) => ({ ts: e.ts, task: checkinTask(e.text) }))
-    .filter((c): c is { ts: number; task: string } => !!c.task);
 
   // 집중 구간 캡: 체크인 주기의 2배 (응답 누락/자리비움을 공백으로 끊기 위함).
   const capMs = Math.max(checkinIntervalSec * 1000 * 2, 5 * 60 * 1000);
@@ -137,11 +159,29 @@ function ReportView({ date, events, checkinIntervalSec }: Props) {
   const crossesDay = (ts: number) => calendarDate(ts) !== date;
   const timeWithDay = (ts: number) =>
     `${formatTime(ts)}${crossesDay(ts) ? " (익일)" : ""}`;
+  const openMemoPopup = (
+    task: string,
+    segment: Segment,
+    event: MouseEvent<HTMLButtonElement>,
+  ) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio =
+      rect.width > 0
+        ? Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+        : 0;
+    setMemoPopup({
+      task,
+      time: Math.round(segment.start + (segment.end - segment.start) * ratio),
+    });
+  };
 
   const renderGrid = () =>
     ticks.map((ts) => (
       <span key={ts} className="gantt-grid" style={{ left: `${pct(ts)}%` }} />
     ));
+  const selectedMemoPoint = memoPopup
+    ? memoAtTime(memoPoints, memoPopup.task, memoPopup.time)
+    : null;
 
   return (
     <div className="report-view">
@@ -181,14 +221,17 @@ function ReportView({ date, events, checkinIntervalSec }: Props) {
               <div className="gantt-track">
                 {renderGrid()}
                 {row.segments.map((s, i) => (
-                  <div
+                  <button
                     key={i}
                     className="gantt-bar"
+                    type="button"
                     style={{
                       left: `${pct(s.start)}%`,
                       width: `${Math.max(pct(s.end) - pct(s.start), 0.4)}%`,
                       background: row.color,
                     }}
+                    aria-label={`${row.task} 메모 보기 ${formatTime(s.start)}-${formatTime(s.end)}`}
+                    onClick={(event) => openMemoPopup(row.task, s, event)}
                     title={`${row.task} ${formatTime(s.start)}–${formatTime(s.end)}`}
                   />
                 ))}
@@ -258,6 +301,70 @@ function ReportView({ date, events, checkinIntervalSec }: Props) {
           </div>
         </div>
       </section>
+
+      {memoPopup && (
+        <div
+          className="report-memo-overlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setMemoPopup(null);
+          }}
+        >
+          <section
+            className="report-memo-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="report-memo-title"
+          >
+            <header className="report-memo-header">
+              <div>
+                <h2 id="report-memo-title">{memoPopup.task}</h2>
+                <span>{timeWithDay(memoPopup.time)}</span>
+              </div>
+              <button
+                className="report-memo-close"
+                type="button"
+                aria-label="닫기"
+                onClick={() => setMemoPopup(null)}
+              >
+                ×
+              </button>
+            </header>
+
+            <div className="report-memo-slider-row">
+              <label htmlFor="report-memo-time">시간대</label>
+              <input
+                id="report-memo-time"
+                className="report-memo-range"
+                type="range"
+                min={t0}
+                max={t1}
+                step={60_000}
+                value={memoPopup.time}
+                onChange={(event) =>
+                  setMemoPopup({
+                    ...memoPopup,
+                    time: Number(event.target.value),
+                  })
+                }
+              />
+            </div>
+
+            <div className="report-memo-meta">
+              {selectedMemoPoint
+                ? `메모 기록 ${timeWithDay(selectedMemoPoint.ts)}`
+                : "선택한 시간대 이전 메모 없음"}
+            </div>
+
+            <div className="markdown-preview report-memo-preview">
+              {renderMarkdown(
+                selectedMemoPoint?.memo ?? "",
+                "이 시간대에 보여줄 메모가 없습니다.",
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
