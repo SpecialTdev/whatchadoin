@@ -1,7 +1,10 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { CheckInStatus } from "./lib/checkin";
+import { latestMemoByTask } from "./lib/checkinMemo";
+import { fetchEvents } from "./lib/events";
+import { renderMarkdown } from "./lib/markdown";
 import "./app-view/App.css";
 import "./CheckInWindow.css";
 
@@ -9,133 +12,34 @@ interface CheckInData extends CheckInStatus {
   tasks: string[];
 }
 
-function renderInline(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text))) {
-    if (match.index > cursor) nodes.push(text.slice(cursor, match.index));
-    const token = match[0];
-    if (token.startsWith("`")) {
-      nodes.push(<code key={`${match.index}-code`}>{token.slice(1, -1)}</code>);
-    } else {
-      nodes.push(<strong key={`${match.index}-bold`}>{token.slice(2, -2)}</strong>);
-    }
-    cursor = match.index + token.length;
-  }
-
-  if (cursor < text.length) nodes.push(text.slice(cursor));
-  return nodes;
-}
-
-function inline(text: string) {
-  return <>{renderInline(text)}</>;
-}
-
-function renderHeading(level: number, text: string, key: number) {
-  if (level === 1) return <h1 key={key}>{inline(text)}</h1>;
-  if (level === 2) return <h2 key={key}>{inline(text)}</h2>;
-  return <h3 key={key}>{inline(text)}</h3>;
-}
-
-function renderMarkdown(markdown: string): ReactNode {
-  const trimmed = markdown.trim();
-  if (!trimmed) {
-    return <p className="markdown-empty">메모를 쓰면 여기에 미리보기가 표시됩니다.</p>;
-  }
-
-  const nodes: ReactNode[] = [];
-  const listItems: ReactNode[] = [];
-  const codeLines: string[] = [];
-  let inCode = false;
-
-  function flushList(key: number) {
-    if (listItems.length === 0) return;
-    nodes.push(<ul key={`ul-${key}`}>{listItems.splice(0)}</ul>);
-  }
-
-  markdown.split("\n").forEach((line, index) => {
-    const fence = line.trim().startsWith("```");
-    if (fence) {
-      if (inCode) {
-        nodes.push(
-          <pre key={`pre-${index}`}>
-            <code>{codeLines.splice(0).join("\n")}</code>
-          </pre>,
-        );
-        inCode = false;
-      } else {
-        flushList(index);
-        inCode = true;
-      }
-      return;
-    }
-
-    if (inCode) {
-      codeLines.push(line);
-      return;
-    }
-
-    if (!line.trim()) {
-      flushList(index);
-      return;
-    }
-
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      flushList(index);
-      nodes.push(renderHeading(heading[1].length, heading[2], index));
-      return;
-    }
-
-    const checked = line.match(/^\s*[-*]\s+\[( |x|X)\]\s+(.+)$/);
-    if (checked) {
-      listItems.push(
-        <li key={`li-${index}`} className="markdown-check-item">
-          <input type="checkbox" checked={checked[1].toLowerCase() === "x"} readOnly />
-          <span>{inline(checked[2])}</span>
-        </li>,
-      );
-      return;
-    }
-
-    const item = line.match(/^\s*[-*]\s+(.+)$/);
-    if (item) {
-      listItems.push(<li key={`li-${index}`}>{inline(item[1])}</li>);
-      return;
-    }
-
-    const quote = line.match(/^>\s?(.+)$/);
-    if (quote) {
-      flushList(index);
-      nodes.push(<blockquote key={`quote-${index}`}>{inline(quote[1])}</blockquote>);
-      return;
-    }
-
-    flushList(index);
-    nodes.push(<p key={`p-${index}`}>{inline(line.trim())}</p>);
-  });
-
-  flushList(markdown.length);
-  if (inCode) {
-    nodes.push(
-      <pre key="pre-tail">
-        <code>{codeLines.join("\n")}</code>
-      </pre>,
-    );
-  }
-
-  return nodes;
-}
-
 function CheckInWindow() {
   const [data, setData] = useState<CheckInData | null>(null);
   const [selected, setSelected] = useState<string>("");
   const [newTask, setNewTask] = useState("");
   const [memo, setMemo] = useState("");
+  const [memoByTask, setMemoByTask] = useState<Record<string, string>>({});
+  const [memoDirty, setMemoDirty] = useState(false);
   const [showNewTaskInput, setShowNewTaskInput] = useState(false);
+
+  function fillMemoForTask(task: string, memos = memoByTask) {
+    setMemo(task ? memos[task] ?? "" : "");
+    setMemoDirty(false);
+  }
+
+  function selectExistingTask(task: string) {
+    setSelected(task);
+    fillMemoForTask(task);
+  }
+
+  function handleNewTaskChange(value: string) {
+    setNewTask(value);
+    if (!memoDirty) fillMemoForTask(value.trim());
+  }
+
+  function handleMemoChange(value: string) {
+    setMemo(value);
+    setMemoDirty(true);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -146,11 +50,21 @@ function CheckInWindow() {
       try {
         const d = await invoke<CheckInData>("get_checkin_data");
         if (cancelled) return;
+        let memos: Record<string, string> = {};
+        try {
+          memos = latestMemoByTask(await fetchEvents());
+        } catch (e) {
+          console.error("[CheckInWindow] latest memo load failed:", e);
+        }
+        if (cancelled) return;
         console.log("[CheckInWindow] get_checkin_data returned:", d);
+        const task = d.active_task ?? d.tasks[0] ?? "";
         setData(d);
-        setSelected(d.active_task ?? d.tasks[0] ?? "");
+        setMemoByTask(memos);
+        setSelected(task);
         setNewTask("");
-        setMemo("");
+        setMemo(task ? memos[task] ?? "" : "");
+        setMemoDirty(false);
         setShowNewTaskInput(d.active_task === null);
       } catch (e) {
         console.error("[CheckInWindow] get_checkin_data error:", e);
@@ -253,6 +167,8 @@ function CheckInWindow() {
     console.log("[CheckInWindow] invoking submit_checkin, task:", task);
     try {
       await invoke("submit_checkin", { task, memo: memo.trim() });
+      setMemoByTask((prev) => ({ ...prev, [task]: memo.trim() }));
+      setMemoDirty(false);
       console.log("[CheckInWindow] submit_checkin returned");
     } catch (e) {
       console.error("[CheckInWindow] submit_checkin error:", e);
@@ -332,7 +248,7 @@ function CheckInWindow() {
             <button
               key={task}
               className={`checkin-task-btn${selected === task ? " selected" : ""}`}
-              onClick={() => setSelected(task)}
+              onClick={() => selectExistingTask(task)}
             >
               {task}
             </button>
@@ -344,7 +260,7 @@ function CheckInWindow() {
           type="text"
           placeholder="새 작업 입력..."
           value={newTask}
-          onChange={(e) => setNewTask(e.target.value)}
+          onChange={(e) => handleNewTaskChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
           autoFocus
         />
@@ -360,13 +276,15 @@ function CheckInWindow() {
             className="checkin-memo-editor"
             placeholder="지금 작업 중인 맥락을 마크다운으로 남기기..."
             value={memo}
-            onChange={(e) => setMemo(e.target.value)}
+            onChange={(e) => handleMemoChange(e.target.value)}
             spellCheck={false}
           />
         </section>
         <section className="checkin-memo-pane preview">
           <span className="checkin-memo-label">미리보기</span>
-          <div className="markdown-preview">{renderMarkdown(memo)}</div>
+          <div className="markdown-preview">
+            {renderMarkdown(memo, "메모를 쓰면 여기에 미리보기가 표시됩니다.")}
+          </div>
         </section>
       </div>
 
@@ -378,6 +296,8 @@ function CheckInWindow() {
             onClick={() => {
               setShowNewTaskInput(true);
               setNewTask("");
+              setMemo("");
+              setMemoDirty(false);
             }}
           >
             새로운 작업
@@ -386,7 +306,10 @@ function CheckInWindow() {
           <button
             className="checkin-new-btn"
             type="button"
-            onClick={() => setShowNewTaskInput(false)}
+            onClick={() => {
+              setShowNewTaskInput(false);
+              fillMemoForTask(selected);
+            }}
           >
             뒤로
           </button>
