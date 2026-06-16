@@ -5,6 +5,7 @@ import WorkView from "../components/WorkView";
 import ReportView from "../components/ReportView";
 import SettingsView from "../components/SettingsView";
 import { parseMarkdown, serializeBoard, newCard, newColumn } from "../lib/kanban";
+import { DEFAULT_NOTE, loadNote } from "../lib/note";
 import {
   fetchEvents,
   isReportEvent,
@@ -58,20 +59,6 @@ function loadBoundaryHour(): number {
   }
 }
 
-const SAMPLE_NOTE = `# 오늘의 작업
-
-## 진행 중
-- [ ] 칸반 리포트 레이아웃 구현
-- [ ] tracking 이벤트 스키마 정의
-
-## 완료
-- [x] Tauri 개발 환경 셋업
-- [x] mockup 브랜치 생성
-
-## 메모
-화면만 띄워두지 말고 실제로 밀도있게...
-`;
-
 // 노트(todo)에서 체크인 후보를 뽑는다: 미완료·비어있지 않은 항목, 중복 제거.
 function deriveTasks(note: string): string[] {
   const board = parseMarkdown(note);
@@ -102,7 +89,7 @@ function appendTask(note: string, task: string): string {
 function App() {
   const [tab, setTab] = useState<Tab>("work");
   const [selectedDate, setSelectedDate] = useState<string>("");
-  const [note, setNote] = useState<string>(SAMPLE_NOTE);
+  const [note, setNote] = useState<string>(DEFAULT_NOTE);
   const [activeTask, setActiveTask] = useState<string | null>(null);
   const [checkInMode, setCheckInMode] = useState<CheckInMode>("off");
   // 체크인의 '직접 입력' → Work view 활성화 신호 (값이 바뀌면 노트 에디터 포커스)
@@ -192,8 +179,24 @@ function App() {
       .catch((e) => console.error("[App] get_checkin_status failed:", e));
   }, [applyCheckInStatus]);
 
-  // note 변경을 Rust 수집기에 push한다 (백그라운드 15s diff의 입력). 추적/이벤트
-  // 기록은 Rust collection crate가 담당하고, 여기선 최신 스냅샷만 넘긴다.
+  // 시작 시 저장된 노트를 디스크에서 불러온다. 저장본이 없으면(최초 실행)
+  // DEFAULT_NOTE를 그대로 두고, 빈 문자열이면 사용자가 비운 상태를 존중한다.
+  // 저장은 프런트가 하지 않는다 — Rust가 15s poll 주기·종료 시점에 영속한다.
+  useEffect(() => {
+    let cancelled = false;
+    loadNote()
+      .then((stored) => {
+        if (!cancelled && stored !== null) setNote(stored);
+      })
+      .catch((e) => console.error("[App] loadNote failed:", e));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // note 변경을 Rust 수집기에 push한다 (백그라운드 15s diff의 입력 + 영속 소스).
+  // 추적/이벤트 기록과 디스크 저장은 Rust collection crate/타이머가 담당하고,
+  // 여기선 최신 스냅샷만 넘긴다.
   useEffect(() => {
     import("@tauri-apps/api/core")
       .then(({ invoke }) => invoke("update_note", { note }))
