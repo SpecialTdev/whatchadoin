@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 
 interface Props {
@@ -73,6 +73,15 @@ function SettingsView({
   const [isInstalling, setIsInstalling] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  // 빌드에 박힌 앱 버전(= tauri.conf.json, updater 비교 기준)을 표시용으로 읽는다.
+  useEffect(() => {
+    import("@tauri-apps/api/app")
+      .then(({ getVersion }) => getVersion())
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
 
   function selectExportLevel(level: ExportPrivacyLevel) {
     setExportLevel(level);
@@ -263,6 +272,10 @@ function SettingsView({
           최신 릴리즈가 있는지 GitHub에서 확인하고, 새 버전이 있으면 앱에서 바로
           내려받아 설치합니다.
         </p>
+
+        {appVersion && (
+          <p className="settings-export-path">현재 버전 v{appVersion}</p>
+        )}
 
         <div className="settings-action-row">
           <button
