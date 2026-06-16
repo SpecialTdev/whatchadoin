@@ -56,7 +56,7 @@ jobs:
       - name: install frontend dependencies
         run: npm ci
 
-      - name: sync app version from tag
+      - name: verify version matches tag
         shell: bash
         run: |
           export VERSION="${GITHUB_REF_NAME#v}"
@@ -66,16 +66,45 @@ jobs:
             exit 1
           fi
 
+          # 커밋된 버전이 단일 진실원본. 태그와 어긋나면 빌드를 실패시켜
+          # (소스 0.1.0에 v1.0.2 태그 같은) 사고를 막는다.
           node <<'EOF'
           const fs = require('fs');
+          const expected = process.env.VERSION;
 
-          const configPath = 'src-tauri/tauri.conf.json';
-          const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+          function tomlPackageVersion(text) {
+            let inPackage = false;
+            for (const raw of text.split(/\r?\n/)) {
+              const line = raw.trim();
+              if (line.startsWith('[')) inPackage = line === '[package]';
+              else if (inPackage) {
+                const m = line.match(/^version\s*=\s*"([^"]+)"/);
+                if (m) return m[1];
+              }
+            }
+            return undefined;
+          }
 
-          config.version = process.env.VERSION;
+          const sources = {
+            'package.json': JSON.parse(fs.readFileSync('package.json', 'utf8')).version,
+            'src-tauri/tauri.conf.json': JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8')).version,
+            'src-tauri/Cargo.toml': tomlPackageVersion(fs.readFileSync('src-tauri/Cargo.toml', 'utf8')),
+          };
 
-          fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
-          console.log(`Using app version ${process.env.VERSION} from tag ${process.env.GITHUB_REF_NAME}`);
+          let ok = true;
+          for (const [file, version] of Object.entries(sources)) {
+            if (version === expected) {
+              console.log(`✓ ${file} = ${expected}`);
+            } else {
+              console.log(`::error file=${file}::version "${version}" does not match tag "${expected}"`);
+              ok = false;
+            }
+          }
+          if (!ok) {
+            console.log(`::error::Bump all versions to ${expected} and commit before tagging ${process.env.GITHUB_REF_NAME}.`);
+            process.exit(1);
+          }
+          console.log(`All source versions match tag ${process.env.GITHUB_REF_NAME}`);
           EOF
 
       - uses: tauri-apps/tauri-action@v0
