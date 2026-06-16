@@ -522,10 +522,18 @@ pub fn run() {
     // TODO: _app_service를 tauri state로 등록.
     //   core-shared의 ReportDto는 향후 tauri command 반환 타입으로 사용.
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(Mutex::new(CheckInState::default()))
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+
+    // updater/process는 desktop 전용 플러그인이다.
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
+    builder
         .setup(|app| {
             // 이벤트 수집기: app data dir의 SQLite에 영속한다.
             let dir = app.path().app_data_dir().expect("app data dir 확보 실패");
