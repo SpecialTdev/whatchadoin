@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Tab } from "../app-view/App";
 import WidgetList from "./WidgetList";
 
@@ -68,4 +69,4 @@ function LeftSidebar({
   );
 }
 
-export default LeftSidebar;
+export default memo(LeftSidebar);

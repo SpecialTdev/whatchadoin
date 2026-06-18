@@ -5,6 +5,7 @@ import WorkView from "../components/WorkView";
 import ReportView from "../components/ReportView";
 import SettingsView from "../components/SettingsView";
 import { parseMarkdown, serializeBoard, newCard, newColumn } from "../lib/kanban";
+import { DEFAULT_NOTE, loadNote } from "../lib/note";
 import {
   fetchEvents,
   isReportEvent,
@@ -25,12 +26,29 @@ const MIN_SEC = 60;
 const MAX_SEC = 1800;
 const DEFAULT_SEC = 60;
 const STORAGE_KEY = "checkin.intervalSec";
+const COLUMN_HEADING_RE = /^##\s+/;
+const CHECKBOX_TASK_RE = /^\s*[-*]\s+\[([ xX])\]\s?(.*)$/;
+const BULLET_TASK_RE = /^\s*[-*]\s+(.*)$/;
 
 // 리포트 하루 경계 시각(시): 자정~오전 11시. 이 시각 전 이벤트는 전날 업무일로 묶인다.
 const MIN_BOUNDARY = 0;
 const MAX_BOUNDARY = 11;
 const DEFAULT_BOUNDARY = 5;
 const BOUNDARY_KEY = "report.dayBoundaryHour";
+
+type TauriCore = typeof import("@tauri-apps/api/core");
+
+let coreApiPromise: Promise<TauriCore> | null = null;
+
+function coreApi(): Promise<TauriCore> {
+  if (!coreApiPromise) {
+    coreApiPromise = import("@tauri-apps/api/core").catch((e) => {
+      coreApiPromise = null;
+      throw e;
+    });
+  }
+  return coreApiPromise;
+}
 
 // localStorage에서 저장된 주기를 읽어 [MIN_SEC, MAX_SEC]로 clamp, 없으면 기본값.
 function loadIntervalSec(): number {
@@ -58,35 +76,59 @@ function loadBoundaryHour(): number {
   }
 }
 
-const SAMPLE_NOTE = `# 오늘의 작업
-
-## 진행 중
-- [ ] 칸반 리포트 레이아웃 구현
-- [ ] tracking 이벤트 스키마 정의
-
-## 완료
-- [x] Tauri 개발 환경 셋업
-- [x] mockup 브랜치 생성
-
-## 메모
-화면만 띄워두지 말고 실제로 밀도있게...
-`;
-
 // 노트(todo)에서 체크인 후보를 뽑는다: 미완료·비어있지 않은 항목, 중복 제거.
 function deriveTasks(note: string): string[] {
-  const board = parseMarkdown(note);
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const col of board.columns) {
-    for (const card of col.cards) {
-      const t = card.text.trim();
-      if (!card.done && t && !seen.has(t)) {
-        seen.add(t);
-        out.push(t);
+
+  let insideColumn = false;
+  for (const raw of note.split("\n")) {
+    if (COLUMN_HEADING_RE.test(raw)) {
+      insideColumn = true;
+      continue;
+    }
+    if (!insideColumn) continue;
+
+    const checkbox = raw.match(CHECKBOX_TASK_RE);
+    if (checkbox) {
+      if (checkbox[1].toLowerCase() !== "x") {
+        const task = checkbox[2].trim();
+        if (task && !seen.has(task)) {
+          seen.add(task);
+          out.push(task);
+        }
+      }
+      continue;
+    }
+
+    const bullet = raw.match(BULLET_TASK_RE);
+    if (bullet) {
+      const task = bullet[1].trim();
+      if (task && !seen.has(task)) {
+        seen.add(task);
+        out.push(task);
       }
     }
   }
+
   return out;
+}
+
+function sameStringArray(a: string[], b: string[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function useStableStringArray(values: string[]): string[] {
+  const ref = useRef(values);
+  return useMemo(() => {
+    if (!sameStringArray(ref.current, values)) ref.current = values;
+    return ref.current;
+  }, [values]);
 }
 
 // 체크인에서 입력한 새 작업을 노트의 '진행 중'(없으면 첫 컬럼/신규 컬럼)에 추가한다.
@@ -102,7 +144,7 @@ function appendTask(note: string, task: string): string {
 function App() {
   const [tab, setTab] = useState<Tab>("work");
   const [selectedDate, setSelectedDate] = useState<string>("");
-  const [note, setNote] = useState<string>(SAMPLE_NOTE);
+  const [note, setNote] = useState<string>(DEFAULT_NOTE);
   const [activeTask, setActiveTask] = useState<string | null>(null);
   const [checkInMode, setCheckInMode] = useState<CheckInMode>("off");
   // 체크인의 '직접 입력' → Work view 활성화 신호 (값이 바뀌면 노트 에디터 포커스)
@@ -115,6 +157,7 @@ function App() {
   );
   // 리포트용 이벤트 목록 (report 탭 진입 시 Rust에서 로드).
   const [reportEvents, setReportEvents] = useState<TrackedEvent[]>([]);
+  const noteRef = useRef(note);
 
   // 시작 시 OS 알림 권한을 확보한다 (없으면 체크인·타이머 알림이 조용히 무시됨).
   useEffect(() => {
@@ -148,8 +191,13 @@ function App() {
     }
   }, []);
 
+  const handleNoteDraftChange = useCallback((draft: string) => {
+    noteRef.current = draft;
+  }, []);
+
   // 체크인 후보 = 노트의 실제 todo 항목
-  const tasks = useMemo(() => deriveTasks(note), [note]);
+  const derivedTasks = useMemo(() => deriveTasks(note), [note]);
+  const tasks = useStableStringArray(derivedTasks);
 
   const tasksRef = useRef(tasks);
   const activeTaskRef = useRef(activeTask);
@@ -165,10 +213,14 @@ function App() {
     setActiveTask(status.active_task);
   }, []);
 
+  useEffect(() => {
+    noteRef.current = note;
+  }, [note]);
+
   // 체크인 주기는 Rust 백그라운드 타이머가 관리한다. 메인 웹뷰가 닫혀도
   // 최신 후보/활성 작업/주기만 유지되면 checkin 창을 계속 띄울 수 있다.
   useEffect(() => {
-    import("@tauri-apps/api/core")
+    coreApi()
       .then(({ invoke }) =>
         invoke("update_checkin_context", {
           tasks,
@@ -182,20 +234,46 @@ function App() {
   const handleCheckInSubmit = useCallback((task: string) => {
     setActiveTask(task);
     // 노트에 없던 새 작업이면 실제 todo로 편입
-    setNote((prev) => (deriveTasks(prev).includes(task) ? prev : appendTask(prev, task)));
+    setNote((prev) => {
+      const latest = noteRef.current || prev;
+      const next = deriveTasks(latest).includes(task)
+        ? latest
+        : appendTask(latest, task);
+      noteRef.current = next;
+      return next;
+    });
   }, []);
 
   useEffect(() => {
-    import("@tauri-apps/api/core")
+    coreApi()
       .then(({ invoke }) => invoke<CheckInStatus>("get_checkin_status"))
       .then(applyCheckInStatus)
       .catch((e) => console.error("[App] get_checkin_status failed:", e));
   }, [applyCheckInStatus]);
 
-  // note 변경을 Rust 수집기에 push한다 (백그라운드 15s diff의 입력). 추적/이벤트
-  // 기록은 Rust collection crate가 담당하고, 여기선 최신 스냅샷만 넘긴다.
+  // 시작 시 저장된 노트를 디스크에서 불러온다. 저장본이 없으면(최초 실행)
+  // DEFAULT_NOTE를 그대로 두고, 빈 문자열이면 사용자가 비운 상태를 존중한다.
+  // 저장은 프런트가 하지 않는다 — Rust가 15s poll 주기·종료 시점에 영속한다.
   useEffect(() => {
-    import("@tauri-apps/api/core")
+    let cancelled = false;
+    loadNote()
+      .then((stored) => {
+        if (!cancelled && stored !== null) {
+          noteRef.current = stored;
+          setNote(stored);
+        }
+      })
+      .catch((e) => console.error("[App] loadNote failed:", e));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // note 변경을 Rust 수집기에 push한다 (백그라운드 15s diff의 입력 + 영속 소스).
+  // 추적/이벤트 기록과 디스크 저장은 Rust collection crate/타이머가 담당하고,
+  // 여기선 최신 스냅샷만 넘긴다.
+  useEffect(() => {
+    coreApi()
       .then(({ invoke }) => invoke("update_note", { note }))
       .catch((e) => console.error("[App] update_note failed:", e));
   }, [note]);
@@ -249,7 +327,7 @@ function App() {
 
   const openCheckIn = useCallback(async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
+      const { invoke } = await coreApi();
       console.log("[App] invoking open_checkin, tasks:", tasksRef.current, "activeTask:", activeTaskRef.current);
       await invoke("open_checkin", {
         tasks: tasksRef.current,
@@ -264,7 +342,7 @@ function App() {
   const runCheckInStatusCommand = useCallback(
     async (command: "clock_in" | "clock_out" | "end_break") => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
+        const { invoke } = await coreApi();
         const status = await invoke<CheckInStatus>(command);
         applyCheckInStatus(status);
       } catch (e) {
@@ -340,6 +418,7 @@ function App() {
           <WorkView
             note={note}
             onNoteChange={setNote}
+            onNoteDraftChange={handleNoteDraftChange}
             tasks={tasks}
             activeTask={activeTask}
             focusSignal={noteFocusNonce}

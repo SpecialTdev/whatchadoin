@@ -10,7 +10,7 @@ serde_json = "1"
 
 [package]
 name = "whatchadoin"
-version = "0.1.0"
+version = "1.1.0"
 description = "업무 밀도 트래커"
 authors = ["kunwo"]
 edition = "2021"
@@ -39,3 +39,8 @@ processing = { path = "crates/processing" }
 collection = { path = "crates/collection" }
 core-shared = { path = "crates/core-shared" }
 tauri-plugin-notification = "2.3.3"
+
+# 자동 업데이트(확인·다운로드·설치·재시작)는 desktop 전용 플러그인으로 처리
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"

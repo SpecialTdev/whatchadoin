@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   type KanbanBoard as Board,
   type KanbanColumn,
@@ -357,4 +357,4 @@ function KanbanCardItem({
   );
 }
 
-export default KanbanBoard;
+export default memo(KanbanBoard);

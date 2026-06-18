@@ -1,36 +1,105 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import KanbanBoard from "./KanbanBoard";
 
 type Focus = "note" | "kanban";
 
 const MIN_RATIO = 15;
 const MAX_RATIO = 85;
+const NOTE_FLUSH_DELAY_MS = 250;
 const clampRatio = (r: number) => Math.min(MAX_RATIO, Math.max(MIN_RATIO, r));
 
 interface Props {
   // note(markdown) = single source of truth (App이 소유). note/kanban 양쪽이 공유 편집한다.
   note: string;
   onNoteChange: (note: string) => void;
+  onNoteDraftChange?: (note: string) => void;
   tasks: string[];
   activeTask: string | null;
   /** 값이 바뀌면(체크인 '직접 입력' 등) Note 패널을 활성화하고 포커스한다 */
   focusSignal?: number;
 }
 
-function WorkView({ note, onNoteChange, tasks, activeTask, focusSignal }: Props) {
+function WorkView({
+  note,
+  onNoteChange,
+  onNoteDraftChange,
+  tasks,
+  activeTask,
+  focusSignal,
+}: Props) {
   const [focus, setFocus] = useState<Focus>("note");
   const [topRatio, setTopRatio] = useState(50); // Note 패널 높이 %
+  const [draftNote, setDraftNote] = useState(note);
 
   const splitRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const draftNoteRef = useRef(note);
+  const lastFlushedNoteRef = useRef(note);
+  const flushTimerRef = useRef<number | null>(null);
 
   const noteActive = focus === "note";
   const kanbanActive = focus === "kanban";
+  const kanbanMarkdown = kanbanActive ? draftNote : note;
+
+  const clearFlushTimer = useCallback(() => {
+    if (flushTimerRef.current == null) return;
+    window.clearTimeout(flushTimerRef.current);
+    flushTimerRef.current = null;
+  }, []);
+
+  const flushDraft = useCallback(() => {
+    clearFlushTimer();
+    const next = draftNoteRef.current;
+    if (next === lastFlushedNoteRef.current) return;
+    lastFlushedNoteRef.current = next;
+    onNoteChange(next);
+  }, [clearFlushTimer, onNoteChange]);
+
+  const scheduleFlush = useCallback(
+    (next: string) => {
+      clearFlushTimer();
+      flushTimerRef.current = window.setTimeout(() => {
+        flushTimerRef.current = null;
+        if (next === lastFlushedNoteRef.current) return;
+        lastFlushedNoteRef.current = next;
+        onNoteChange(next);
+      }, NOTE_FLUSH_DELAY_MS);
+    },
+    [clearFlushTimer, onNoteChange],
+  );
 
   function activateNote() {
     setFocus("note");
     textareaRef.current?.focus();
   }
+
+  function activateKanban() {
+    flushDraft();
+    setFocus("kanban");
+  }
+
+  function handleNoteChange(value: string) {
+    draftNoteRef.current = value;
+    setDraftNote(value);
+    onNoteDraftChange?.(value);
+    scheduleFlush(value);
+  }
+
+  useEffect(() => {
+    if (note === lastFlushedNoteRef.current) return;
+    clearFlushTimer();
+    lastFlushedNoteRef.current = note;
+    draftNoteRef.current = note;
+    setDraftNote(note);
+  }, [clearFlushTimer, note]);
+
+  useEffect(() => {
+    return () => {
+      clearFlushTimer();
+      const pending = draftNoteRef.current;
+      if (pending !== lastFlushedNoteRef.current) onNoteChange(pending);
+    };
+  }, [clearFlushTimer, onNoteChange]);
 
   // 외부 신호(체크인 '직접 입력')로 Note 활성화
   useEffect(() => {
@@ -72,7 +141,7 @@ function WorkView({ note, onNoteChange, tasks, activeTask, focusSignal }: Props)
             </button>
             <button
               className={kanbanActive ? "active" : ""}
-              onClick={() => setFocus("kanban")}
+              onClick={activateKanban}
             >
               Kanban
             </button>
@@ -105,10 +174,11 @@ function WorkView({ note, onNoteChange, tasks, activeTask, focusSignal }: Props)
           <textarea
             ref={textareaRef}
             className="markdown-editor"
-            value={note}
+            value={draftNote}
             readOnly={!noteActive}
             onFocus={() => setFocus("note")}
-            onChange={(e) => onNoteChange(e.target.value)}
+            onChange={(e) => handleNoteChange(e.target.value)}
+            onBlur={flushDraft}
             spellCheck={false}
           />
           {!noteActive && (
@@ -135,7 +205,7 @@ function WorkView({ note, onNoteChange, tasks, activeTask, focusSignal }: Props)
           className={`workspace-pane kanban-pane${kanbanActive ? "" : " inactive"}`}
         >
           <KanbanBoard
-            markdown={note}
+            markdown={kanbanMarkdown}
             onChange={onNoteChange}
             active={kanbanActive}
           />
@@ -143,7 +213,7 @@ function WorkView({ note, onNoteChange, tasks, activeTask, focusSignal }: Props)
             <button
               className="pane-overlay"
               aria-label="Kanban 활성화"
-              onClick={() => setFocus("kanban")}
+              onClick={activateKanban}
             />
           )}
         </section>
@@ -159,4 +229,4 @@ function WorkView({ note, onNoteChange, tasks, activeTask, focusSignal }: Props)
   );
 }
 
-export default WorkView;
+export default memo(WorkView);

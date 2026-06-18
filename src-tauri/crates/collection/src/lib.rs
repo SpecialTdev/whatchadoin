@@ -71,6 +71,12 @@ impl Collector {
         })
     }
 
+    /// 프런트가 마지막으로 push한 최신 note 스냅샷 (영속/표시용). 아직 push가
+    /// 없으면 None.
+    pub fn latest_note(&self) -> Option<String> {
+        self.latest.clone()
+    }
+
     /// 프런트엔드가 note를 편집할 때마다 최신 스냅샷을 받아 둔다.
     pub fn update_note(&mut self, note: String) {
         // 최초 note를 기준점(baseline)으로 잡는다. 이렇게 해야 시작 직후(첫 15s 안)의

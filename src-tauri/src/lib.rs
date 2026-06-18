@@ -92,6 +92,28 @@ fn widgets_path(app: &AppHandle) -> Option<PathBuf> {
     Some(dir.join("widgets.json"))
 }
 
+// workspace 노트(마크다운) 경로. app data dir이 없으면 생성한다.
+fn note_path(app: &AppHandle) -> Option<PathBuf> {
+    let dir = app.path().app_data_dir().ok()?;
+    std::fs::create_dir_all(&dir).ok();
+    Some(dir.join("workspace-note.md"))
+}
+
+// collector가 들고 있는 최신 note 스냅샷을 workspace-note.md에 저장한다.
+// 키 입력 경로가 아니라 15s poll 주기와 종료 시점에서만 호출해 렉을 피한다.
+fn persist_note(app: &AppHandle) {
+    let note = {
+        let state = app.state::<Mutex<collection::Collector>>();
+        let note = state.lock().unwrap().latest_note();
+        note
+    };
+    if let (Some(note), Some(path)) = (note, note_path(app)) {
+        if let Err(e) = std::fs::write(&path, note) {
+            println!("[Rust] note 저장 실패: {}", e);
+        }
+    }
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.unminimize();
@@ -129,7 +151,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             TRAY_SHOW_ID => show_main_window(app),
-            TRAY_QUIT_ID => app.exit(0),
+            TRAY_QUIT_ID => {
+                persist_note(app);
+                app.exit(0);
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| match event {
@@ -466,6 +491,14 @@ fn save_widgets(app: AppHandle, widgets: Vec<WidgetData>) -> Result<(), String> 
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
+// 저장된 workspace 노트를 읽어 반환한다 (Work view 초기 로드). 파일이 없으면
+// None → 프런트가 기본 노트를 사용한다. (빈 파일은 사용자가 비운 상태로 보존)
+// 저장은 프런트가 아니라 Rust가 15s poll 주기·종료 시점에 수행한다(persist_note).
+#[tauri::command]
+fn get_note(app: AppHandle) -> Option<String> {
+    note_path(&app).and_then(|p| std::fs::read_to_string(&p).ok())
+}
+
 // 프런트(위젯 등)가 요청하는 시스템 알림을 띄운다 (타이머 완료 알람 등).
 #[tauri::command]
 fn notify(app: AppHandle, title: String, body: String) {
@@ -522,10 +555,18 @@ pub fn run() {
     // TODO: _app_service를 tauri state로 등록.
     //   core-shared의 ReportDto는 향후 tauri command 반환 타입으로 사용.
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(Mutex::new(CheckInState::default()))
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+
+    // updater/process는 desktop 전용 플러그인이다.
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
+    builder
         .setup(|app| {
             // 이벤트 수집기: app data dir의 SQLite에 영속한다.
             let dir = app.path().app_data_dir().expect("app data dir 확보 실패");
@@ -543,26 +584,43 @@ pub fn run() {
             }
 
             // 15s마다 note 변경을 diff해 이벤트로 기록하고 main 창에 push한다.
+            // 같은 주기에 최신 note 스냅샷도 디스크에 영속한다(키 입력 경로와 분리해 렉 방지).
             let handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(15));
-                let new_events = {
-                    let state = handle.state::<Mutex<collection::Collector>>();
-                    let mut c = state.lock().unwrap();
-                    c.poll()
-                };
-                println!(
-                    "[Rust] events poll tick → {} new event(s)",
-                    new_events.len()
-                );
-                for ev in new_events {
-                    let _ = handle.emit_to(
-                        EventTarget::WebviewWindow {
-                            label: "main".to_string(),
-                        },
-                        "events://new",
-                        ev,
+            std::thread::spawn(move || {
+                let mut last_written: Option<String> = None;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(15));
+                    let (new_events, note) = {
+                        let state = handle.state::<Mutex<collection::Collector>>();
+                        let mut c = state.lock().unwrap();
+                        (c.poll(), c.latest_note())
+                    };
+
+                    // 노트 영속: 직전 저장과 달라졌을 때만 쓴다(15s당 최대 1회).
+                    if let Some(n) = note {
+                        if last_written.as_deref() != Some(n.as_str()) {
+                            if let Some(path) = note_path(&handle) {
+                                match std::fs::write(&path, &n) {
+                                    Ok(()) => last_written = Some(n),
+                                    Err(e) => println!("[Rust] note 저장 실패: {}", e),
+                                }
+                            }
+                        }
+                    }
+
+                    println!(
+                        "[Rust] events poll tick → {} new event(s)",
+                        new_events.len()
                     );
+                    for ev in new_events {
+                        let _ = handle.emit_to(
+                            EventTarget::WebviewWindow {
+                                label: "main".to_string(),
+                            },
+                            "events://new",
+                            ev,
+                        );
+                    }
                 }
             });
 
@@ -639,8 +697,15 @@ pub fn run() {
             export_events_db,
             get_widgets,
             save_widgets,
+            get_note,
             notify
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // 종료 직전(트레이 '종료', Cmd+Q, dock 종료 등 모든 경로) 최신 노트를 저장한다.
+            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+                persist_note(app_handle);
+            }
+        });
 }

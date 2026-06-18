@@ -1,6 +1,6 @@
 // background tracking이 기록한 업무 이벤트 로그 피드.
 // 초기 목록은 get_events로 로드하고, 이후 events://new로 증분 갱신한다.
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import {
   KIND_COLOR,
   fetchEvents,
@@ -72,4 +72,4 @@ function RightSidebar() {
   );
 }
 
-export default RightSidebar;
+export default memo(RightSidebar);

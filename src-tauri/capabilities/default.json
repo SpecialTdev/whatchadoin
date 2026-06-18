@@ -7,6 +7,9 @@
     "core:default",
     "core:window:allow-hide",
     "opener:default",
-    "notification:default"
+    "opener:allow-open-url",
+    "notification:default",
+    "updater:default",
+    "process:allow-restart"
   ]
 }
