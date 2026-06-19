@@ -11,6 +11,11 @@ export interface TrackedEvent {
   text: string;
 }
 
+export interface EventsPageRequest {
+  limit: number;
+  offset: number;
+}
+
 // 이벤트 종류별 색상 (점). phase 2/3에서 app/web/comm 추가 예정.
 export const KIND_COLOR: Record<EventKind, string> = {
   note: "#2ecc71", // 노트(todo) 변경
@@ -27,6 +32,15 @@ export function isReportEvent(ev: TrackedEvent): boolean {
 export async function fetchEvents(): Promise<TrackedEvent[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<TrackedEvent[]>("get_events");
+}
+
+// Rust에서 저장된 이벤트를 최신순 페이지 단위로 가져온다.
+export async function fetchEventsPage({
+  limit,
+  offset,
+}: EventsPageRequest): Promise<TrackedEvent[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<TrackedEvent[]>("get_events", { limit, offset });
 }
 
 function pad2(n: number): string {

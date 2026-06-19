@@ -450,12 +450,22 @@ fn update_note(collector: tauri::State<'_, Mutex<collection::Collector>>, note: 
     collector.lock().unwrap().update_note(note);
 }
 
-/// 저장된 모든 이벤트를 최신순으로 반환한다 (right sidebar 초기 로드).
+/// 저장된 이벤트를 최신순으로 반환한다. limit이 있으면 페이지 단위로 반환한다.
 #[tauri::command]
 fn get_events(
     collector: tauri::State<'_, Mutex<collection::Collector>>,
+    limit: Option<i64>,
+    offset: Option<i64>,
 ) -> Vec<core_shared::Event> {
-    collector.lock().unwrap().all_events()
+    let collector = collector.lock().unwrap();
+    match limit {
+        Some(limit) => {
+            let limit = limit.clamp(1, 200);
+            let offset = offset.unwrap_or(0).max(0);
+            collector.events_page(limit, offset)
+        }
+        None => collector.all_events(),
+    }
 }
 
 #[tauri::command]
