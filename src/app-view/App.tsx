@@ -35,8 +35,14 @@ const MIN_BOUNDARY = 0;
 const MAX_BOUNDARY = 11;
 const DEFAULT_BOUNDARY = 5;
 const BOUNDARY_KEY = "report.dayBoundaryHour";
+const LEFT_SIDEBAR_KEY = "layout.leftSidebarVisible";
+const RIGHT_SIDEBAR_KEY = "layout.rightSidebarVisible";
 
 type TauriCore = typeof import("@tauri-apps/api/core");
+
+type PlatformInfo = {
+  os: string;
+};
 
 let coreApiPromise: Promise<TauriCore> | null = null;
 
@@ -73,6 +79,24 @@ function loadBoundaryHour(): number {
     return Math.min(MAX_BOUNDARY, Math.max(MIN_BOUNDARY, Math.round(h)));
   } catch {
     return DEFAULT_BOUNDARY;
+  }
+}
+
+function loadStoredBoolean(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    return raw === "true";
+  } catch {
+    return fallback;
+  }
+}
+
+function storeBoolean(key: string, value: boolean): void {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // 저장 실패는 무시 (세션 한정으로 동작)
   }
 }
 
@@ -143,6 +167,16 @@ function appendTask(note: string, task: string): string {
 
 function App() {
   const [tab, setTab] = useState<Tab>("work");
+  const [isMacos, setIsMacos] = useState<boolean>(() => {
+    const platform = navigator.platform || navigator.userAgent;
+    return /mac/i.test(platform);
+  });
+  const [leftSidebarVisible, setLeftSidebarVisible] = useState<boolean>(() =>
+    loadStoredBoolean(LEFT_SIDEBAR_KEY, true),
+  );
+  const [rightSidebarVisible, setRightSidebarVisible] = useState<boolean>(() =>
+    loadStoredBoolean(RIGHT_SIDEBAR_KEY, true),
+  );
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [note, setNote] = useState<string>(DEFAULT_NOTE);
   const [activeTask, setActiveTask] = useState<string | null>(null);
@@ -216,6 +250,21 @@ function App() {
   useEffect(() => {
     noteRef.current = note;
   }, [note]);
+
+  useEffect(() => {
+    coreApi()
+      .then(({ invoke }) => invoke<PlatformInfo>("get_platform_info"))
+      .then((info) => setIsMacos(info.os === "macos"))
+      .catch((e) => console.error("[App] get_platform_info failed:", e));
+  }, []);
+
+  useEffect(() => {
+    storeBoolean(LEFT_SIDEBAR_KEY, leftSidebarVisible);
+  }, [leftSidebarVisible]);
+
+  useEffect(() => {
+    storeBoolean(RIGHT_SIDEBAR_KEY, rightSidebarVisible);
+  }, [rightSidebarVisible]);
 
   // 체크인 주기는 Rust 백그라운드 타이머가 관리한다. 메인 웹뷰가 닫혀도
   // 최신 후보/활성 작업/주기만 유지되면 checkin 창을 계속 띄울 수 있다.
@@ -403,9 +452,50 @@ function App() {
     [reportEvents, dayBoundaryHour, selectedDate],
   );
 
+  const layoutClassName = [
+    "layout",
+    isMacos ? "macos-titlebar" : "",
+    leftSidebarVisible ? "" : "left-sidebar-collapsed",
+    rightSidebarVisible ? "" : "right-sidebar-collapsed",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className="layout">
+    <div className={layoutClassName}>
+      {isMacos && (
+        <div className="native-titlebar-controls">
+          <div className="titlebar-drag-region" data-tauri-drag-region />
+          <div className="native-titlebar-title">Whatchadoin</div>
+          <button
+            className="sidebar-toggle left"
+            type="button"
+            aria-label={
+              leftSidebarVisible ? "왼쪽 사이드바 접기" : "왼쪽 사이드바 펼치기"
+            }
+            aria-pressed={leftSidebarVisible}
+            onClick={() => setLeftSidebarVisible((visible) => !visible)}
+          >
+            <span className="sidebar-toggle-icon" aria-hidden="true" />
+          </button>
+          <button
+            className="sidebar-toggle right"
+            type="button"
+            aria-label={
+              rightSidebarVisible
+                ? "오른쪽 사이드바 접기"
+                : "오른쪽 사이드바 펼치기"
+            }
+            aria-pressed={rightSidebarVisible}
+            onClick={() => setRightSidebarVisible((visible) => !visible)}
+          >
+            <span className="sidebar-toggle-icon" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       <LeftSidebar
+        className={leftSidebarVisible ? "" : "hidden"}
         tab={tab}
         onTabChange={setTab}
         dates={reportDates}
@@ -443,7 +533,7 @@ function App() {
         )}
       </main>
 
-      <RightSidebar />
+      <RightSidebar className={rightSidebarVisible ? "" : "hidden"} />
 
       <div className={`work-session-controls ${checkInMode}`}>
         <span className="work-session-label">{sessionLabel}</span>

@@ -3,6 +3,7 @@ import type { Tab } from "../app-view/App";
 import WidgetList from "./WidgetList";
 
 interface Props {
+  className?: string;
   tab: Tab;
   onTabChange: (tab: Tab) => void;
   dates: string[];
@@ -11,6 +12,7 @@ interface Props {
 }
 
 function LeftSidebar({
+  className = "",
   tab,
   onTabChange,
   dates,
@@ -18,7 +20,7 @@ function LeftSidebar({
   onSelectDate,
 }: Props) {
   return (
-    <aside className="left-sidebar">
+    <aside className={`left-sidebar${className ? ` ${className}` : ""}`}>
       <div className="tab-switcher">
         <button
           className={`tab-btn ${tab === "work" ? "active" : ""}`}

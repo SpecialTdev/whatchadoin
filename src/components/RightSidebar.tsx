@@ -8,7 +8,11 @@ import {
   type TrackedEvent,
 } from "../lib/events";
 
-function RightSidebar() {
+interface Props {
+  className?: string;
+}
+
+function RightSidebar({ className = "" }: Props) {
   const [events, setEvents] = useState<TrackedEvent[]>([]);
 
   useEffect(() => {
@@ -45,7 +49,7 @@ function RightSidebar() {
   }, []);
 
   return (
-    <aside className="right-sidebar">
+    <aside className={`right-sidebar${className ? ` ${className}` : ""}`}>
       <div className="events-header">
         <span className="events-title">Events</span>
         <span className="tracking-status">

@@ -73,6 +73,18 @@ struct ExportedDb {
     path: String,
 }
 
+#[derive(serde::Serialize)]
+struct PlatformInfo {
+    os: &'static str,
+}
+
+#[tauri::command]
+fn get_platform_info() -> PlatformInfo {
+    PlatformInfo {
+        os: std::env::consts::OS,
+    }
+}
+
 // 좌측 사이드바 위젯 한 개. app_data_dir/widgets.json에 JSON으로 영속한다.
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct WidgetData {
@@ -682,6 +694,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_platform_info,
             open_checkin,
             update_checkin_context,
             get_checkin_data,
