@@ -1,4 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import LeftSidebar from "../components/LeftSidebar";
 import RightSidebar from "../components/RightSidebar";
 import WorkView from "../components/WorkView";
@@ -37,6 +42,12 @@ const DEFAULT_BOUNDARY = 5;
 const BOUNDARY_KEY = "report.dayBoundaryHour";
 const LEFT_SIDEBAR_KEY = "layout.leftSidebarVisible";
 const RIGHT_SIDEBAR_KEY = "layout.rightSidebarVisible";
+const RIGHT_SIDEBAR_WIDTH_KEY = "layout.rightSidebarWidth";
+const DEFAULT_RIGHT_SIDEBAR_WIDTH = 200;
+const MIN_RIGHT_SIDEBAR_WIDTH = 160;
+const MAX_RIGHT_SIDEBAR_WIDTH = 420;
+const MIN_MAIN_WIDTH = 320;
+const RIGHT_SIDEBAR_KEYBOARD_STEP = 10;
 
 type TauriCore = typeof import("@tauri-apps/api/core");
 
@@ -92,12 +103,40 @@ function loadStoredBoolean(key: string, fallback: boolean): boolean {
   }
 }
 
+function loadStoredNumber(key: string, fallback: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function storeBoolean(key: string, value: boolean): void {
   try {
     localStorage.setItem(key, String(value));
   } catch {
     // 저장 실패는 무시 (세션 한정으로 동작)
   }
+}
+
+function storeNumber(key: string, value: number): void {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // 저장 실패는 무시 (세션 한정으로 동작)
+  }
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function readCssPixelValue(style: CSSStyleDeclaration, name: string): number {
+  const value = Number.parseFloat(style.getPropertyValue(name));
+  return Number.isFinite(value) ? value : 0;
 }
 
 // 노트(todo)에서 체크인 후보를 뽑는다: 미완료·비어있지 않은 항목, 중복 제거.
@@ -177,6 +216,13 @@ function App() {
   const [rightSidebarVisible, setRightSidebarVisible] = useState<boolean>(() =>
     loadStoredBoolean(RIGHT_SIDEBAR_KEY, true),
   );
+  const [rightSidebarWidth, setRightSidebarWidth] = useState<number>(() =>
+    clampNumber(
+      loadStoredNumber(RIGHT_SIDEBAR_WIDTH_KEY, DEFAULT_RIGHT_SIDEBAR_WIDTH),
+      MIN_RIGHT_SIDEBAR_WIDTH,
+      MAX_RIGHT_SIDEBAR_WIDTH,
+    ),
+  );
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [note, setNote] = useState<string>(DEFAULT_NOTE);
   const [activeTask, setActiveTask] = useState<string | null>(null);
@@ -191,7 +237,20 @@ function App() {
   );
   // 리포트용 이벤트 목록 (report 탭 진입 시 Rust에서 로드).
   const [reportEvents, setReportEvents] = useState<TrackedEvent[]>([]);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const rightSidebarWidthRef = useRef(rightSidebarWidth);
   const noteRef = useRef(note);
+
+  useEffect(() => {
+    rightSidebarWidthRef.current = rightSidebarWidth;
+  }, [rightSidebarWidth]);
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+    };
+  }, []);
 
   // 시작 시 OS 알림 권한을 확보한다 (없으면 체크인·타이머 알림이 조용히 무시됨).
   useEffect(() => {
@@ -265,6 +324,115 @@ function App() {
   useEffect(() => {
     storeBoolean(RIGHT_SIDEBAR_KEY, rightSidebarVisible);
   }, [rightSidebarVisible]);
+
+  const getClampedRightSidebarWidth = useCallback((value: number): number => {
+    const layoutEl = layoutRef.current;
+    if (!layoutEl) {
+      return clampNumber(value, MIN_RIGHT_SIDEBAR_WIDTH, MAX_RIGHT_SIDEBAR_WIDTH);
+    }
+
+    const rect = layoutEl.getBoundingClientRect();
+    const style = getComputedStyle(layoutEl);
+    const leftWidth = readCssPixelValue(style, "--left-sidebar-width");
+    const maxByLayout = Math.max(
+      MIN_RIGHT_SIDEBAR_WIDTH,
+      rect.width - leftWidth - MIN_MAIN_WIDTH,
+    );
+    return clampNumber(
+      value,
+      MIN_RIGHT_SIDEBAR_WIDTH,
+      Math.min(MAX_RIGHT_SIDEBAR_WIDTH, maxByLayout),
+    );
+  }, []);
+
+  const commitRightSidebarWidth = useCallback(
+    (value: number) => {
+      const nextWidth = getClampedRightSidebarWidth(Math.round(value));
+      rightSidebarWidthRef.current = nextWidth;
+      layoutRef.current?.style.setProperty(
+        "--right-sidebar-width",
+        `${nextWidth}px`,
+      );
+      setRightSidebarWidth(nextWidth);
+      storeNumber(RIGHT_SIDEBAR_WIDTH_KEY, nextWidth);
+    },
+    [getClampedRightSidebarWidth],
+  );
+
+  const widthFromPointerX = useCallback(
+    (clientX: number): number => {
+      const layoutEl = layoutRef.current;
+      if (!layoutEl) return rightSidebarWidthRef.current;
+      const rect = layoutEl.getBoundingClientRect();
+      return getClampedRightSidebarWidth(rect.right - clientX);
+    },
+    [getClampedRightSidebarWidth],
+  );
+
+  const handleRightSidebarSplitterPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!rightSidebarVisible || event.button !== 0) return;
+
+      event.preventDefault();
+      const splitter = event.currentTarget;
+      const layoutEl = layoutRef.current;
+      splitter.setPointerCapture(event.pointerId);
+      document.body.classList.add("right-sidebar-resizing");
+      layoutEl?.classList.add("right-sidebar-resizing");
+
+      const updateWidth = (clientX: number) => {
+        const nextWidth = widthFromPointerX(clientX);
+        rightSidebarWidthRef.current = nextWidth;
+        layoutEl?.style.setProperty("--right-sidebar-width", `${nextWidth}px`);
+      };
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        moveEvent.preventDefault();
+        updateWidth(moveEvent.clientX);
+      };
+
+      const finishDrag = (upEvent?: PointerEvent) => {
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", finishDrag);
+        window.removeEventListener("pointercancel", finishDrag);
+        document.body.classList.remove("right-sidebar-resizing");
+        layoutEl?.classList.remove("right-sidebar-resizing");
+        dragCleanupRef.current = null;
+
+        if (splitter.hasPointerCapture(event.pointerId)) {
+          splitter.releasePointerCapture(event.pointerId);
+        }
+        if (upEvent) updateWidth(upEvent.clientX);
+        commitRightSidebarWidth(rightSidebarWidthRef.current);
+      };
+
+      dragCleanupRef.current = () => finishDrag();
+      updateWidth(event.clientX);
+      window.addEventListener("pointermove", handlePointerMove, {
+        passive: false,
+      });
+      window.addEventListener("pointerup", finishDrag);
+      window.addEventListener("pointercancel", finishDrag);
+    },
+    [
+      commitRightSidebarWidth,
+      rightSidebarVisible,
+      widthFromPointerX,
+    ],
+  );
+
+  const handleRightSidebarSplitterKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (!rightSidebarVisible) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const direction = event.key === "ArrowLeft" ? 1 : -1;
+      commitRightSidebarWidth(
+        rightSidebarWidthRef.current + direction * RIGHT_SIDEBAR_KEYBOARD_STEP,
+      );
+    },
+    [commitRightSidebarWidth, rightSidebarVisible],
+  );
 
   // 체크인 주기는 Rust 백그라운드 타이머가 관리한다. 메인 웹뷰가 닫혀도
   // 최신 후보/활성 작업/주기만 유지되면 checkin 창을 계속 띄울 수 있다.
@@ -462,7 +630,17 @@ function App() {
     .join(" ");
 
   return (
-    <div className={layoutClassName}>
+    <div
+      ref={layoutRef}
+      className={layoutClassName}
+      style={
+        {
+          "--right-sidebar-width": rightSidebarVisible
+            ? `${rightSidebarWidth}px`
+            : "0px",
+        } as CSSProperties
+      }
+    >
       {isMacos && (
         <div className="native-titlebar-controls">
           <div className="titlebar-drag-region" data-tauri-drag-region />
@@ -532,6 +710,21 @@ function App() {
           />
         )}
       </main>
+
+      {rightSidebarVisible && (
+        <div
+          className="right-sidebar-splitter"
+          role="separator"
+          aria-label="오른쪽 사이드바 크기 조절"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_RIGHT_SIDEBAR_WIDTH}
+          aria-valuemax={MAX_RIGHT_SIDEBAR_WIDTH}
+          aria-valuenow={rightSidebarWidth}
+          tabIndex={0}
+          onPointerDown={handleRightSidebarSplitterPointerDown}
+          onKeyDown={handleRightSidebarSplitterKeyDown}
+        />
+      )}
 
       <RightSidebar className={rightSidebarVisible ? "" : "hidden"} />
 
