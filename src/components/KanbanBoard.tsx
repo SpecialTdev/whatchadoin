@@ -13,8 +13,6 @@ interface Props {
   /** source of truth: markdown todo note */
   markdown: string;
   onChange: (markdown: string) => void;
-  /** false면 패널이 비활성(아웃포커스) — 드래그 시작을 막는다 */
-  active: boolean;
 }
 
 interface DropTarget {
@@ -28,7 +26,7 @@ function sameTarget(a: DropTarget | null, b: DropTarget | null): boolean {
   return a.colId === b.colId && a.beforeCardId === b.beforeCardId;
 }
 
-function KanbanBoard({ markdown, onChange, active }: Props) {
+function KanbanBoard({ markdown, onChange }: Props) {
   const [board, setBoard] = useState<Board>(() => parseMarkdown(markdown));
 
   // 우리가 직접 직렬화해 내보낸 마크다운인지 추적해, 외부(note) 편집만 re-parse.
@@ -129,7 +127,6 @@ function KanbanBoard({ markdown, onChange, active }: Props) {
 
   // ----- drag & drop (pointer 기반: WebView에서 안정적) -----
   function startDrag(cardId: string, fromColId: string) {
-    if (!active) return;
     draggedRef.current = { cardId, fromColId };
     setDraggingId(cardId);
   }

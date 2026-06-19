@@ -3,10 +3,7 @@ import KanbanBoard from "./KanbanBoard";
 
 type Focus = "note" | "kanban";
 
-const MIN_RATIO = 15;
-const MAX_RATIO = 85;
 const NOTE_FLUSH_DELAY_MS = 250;
-const clampRatio = (r: number) => Math.min(MAX_RATIO, Math.max(MIN_RATIO, r));
 
 interface Props {
   // note(markdown) = single source of truth (App이 소유). note/kanban 양쪽이 공유 편집한다.
@@ -28,10 +25,8 @@ function WorkView({
   focusSignal,
 }: Props) {
   const [focus, setFocus] = useState<Focus>("note");
-  const [topRatio, setTopRatio] = useState(50); // Note 패널 높이 %
   const [draftNote, setDraftNote] = useState(note);
 
-  const splitRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const draftNoteRef = useRef(note);
   const lastFlushedNoteRef = useRef(note);
@@ -109,24 +104,6 @@ function WorkView({
     }
   }, [focusSignal]);
 
-  function onDividerPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-
-  function onDividerPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-    const rect = splitRef.current?.getBoundingClientRect();
-    if (!rect || rect.height === 0) return;
-    setTopRatio(clampRatio(((e.clientY - rect.top) / rect.height) * 100));
-  }
-
-  function onDividerPointerUp(e: React.PointerEvent<HTMLDivElement>) {
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
-  }
-
   return (
     <div className="work-view">
       <div className="editor-toolbar">
@@ -166,63 +143,33 @@ function WorkView({
         </div>
       )}
 
-      <div className="workspace-split" ref={splitRef}>
-        <section
-          className={`workspace-pane note-pane${noteActive ? "" : " inactive"}`}
-          style={{ flex: `0 0 ${topRatio}%` }}
-        >
-          <textarea
-            ref={textareaRef}
-            className="markdown-editor"
-            value={draftNote}
-            readOnly={!noteActive}
-            onFocus={() => setFocus("note")}
-            onChange={(e) => handleNoteChange(e.target.value)}
-            onBlur={flushDraft}
-            spellCheck={false}
-          />
-          {!noteActive && (
-            <button
-              className="pane-overlay"
-              aria-label="Note 활성화"
-              onClick={activateNote}
+      <div className="workspace-split">
+        {noteActive ? (
+          <section className="workspace-pane note-pane">
+            <textarea
+              ref={textareaRef}
+              className="markdown-editor"
+              value={draftNote}
+              onFocus={() => setFocus("note")}
+              onChange={(e) => handleNoteChange(e.target.value)}
+              onBlur={flushDraft}
+              spellCheck={false}
             />
-          )}
-        </section>
-
-        <div
-          className="split-divider"
-          role="separator"
-          aria-orientation="horizontal"
-          onPointerDown={onDividerPointerDown}
-          onPointerMove={onDividerPointerMove}
-          onPointerUp={onDividerPointerUp}
-        >
-          <span className="split-grip" />
-        </div>
-
-        <section
-          className={`workspace-pane kanban-pane${kanbanActive ? "" : " inactive"}`}
-        >
-          <KanbanBoard
-            markdown={kanbanMarkdown}
-            onChange={onNoteChange}
-            active={kanbanActive}
-          />
-          {!kanbanActive && (
-            <button
-              className="pane-overlay"
-              aria-label="Kanban 활성화"
-              onClick={activateKanban}
+          </section>
+        ) : (
+          <section className="workspace-pane kanban-pane">
+            <KanbanBoard
+              markdown={kanbanMarkdown}
+              onChange={onNoteChange}
             />
-          )}
-        </section>
+          </section>
+        )}
       </div>
 
       <div className="editor-footer">
         <span className="hint">
-          두 뷰가 동시 동기화 — 클릭한 쪽이 활성화됩니다. ## 제목은 컬럼, - [ ]
-          항목은 카드. 카드는 왼쪽 핸들로 드래그해 이동.
+          Note와 Kanban은 같은 마크다운을 사용합니다. ## 제목은 컬럼, - [ ] 항목은
+          카드. 카드는 왼쪽 핸들로 드래그해 이동.
         </span>
       </div>
     </div>
