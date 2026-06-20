@@ -1,12 +1,17 @@
 import { memo, useEffect, useRef, useState } from "react";
 import {
+  type CardDropTarget as DropTarget,
   type KanbanBoard as Board,
-  type KanbanColumn,
   type KanbanCard,
-  parseMarkdown,
-  serializeBoard,
+  type KanbanColumn,
+  type KanbanRow,
+  type KanbanSubitem,
+  moveCard as moveCardInBoard,
   newCard,
   newColumn,
+  newRow,
+  parseMarkdown,
+  serializeBoard,
 } from "../lib/kanban";
 
 interface Props {
@@ -15,15 +20,14 @@ interface Props {
   onChange: (markdown: string) => void;
 }
 
-interface DropTarget {
-  colId: string;
-  beforeCardId: string | null;
-}
-
 function sameTarget(a: DropTarget | null, b: DropTarget | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  return a.colId === b.colId && a.beforeCardId === b.beforeCardId;
+  return (
+    a.rowId === b.rowId &&
+    a.colId === b.colId &&
+    a.beforeCardId === b.beforeCardId
+  );
 }
 
 function KanbanBoard({ markdown, onChange }: Props) {
@@ -37,7 +41,9 @@ function KanbanBoard({ markdown, onChange }: Props) {
   const [ghostPos, setGhostPos] = useState<{ x: number; y: number } | null>(null);
   const [justAddedId, setJustAddedId] = useState<string | null>(null);
 
-  const draggedRef = useRef<{ cardId: string; fromColId: string } | null>(null);
+  const draggedRef = useRef<{ cardId: string; fromRowId: string; fromColId: string } | null>(
+    null,
+  );
 
   useEffect(() => {
     if (markdown !== lastSerialized.current) {
@@ -53,102 +59,125 @@ function KanbanBoard({ markdown, onChange }: Props) {
     onChange(md);
   }
 
-  function mapColumns(fn: (col: KanbanColumn) => KanbanColumn) {
-    commit({ ...board, columns: board.columns.map(fn) });
+  function mapRows(fn: (row: KanbanRow) => KanbanRow) {
+    commit({ ...board, rows: board.rows.map(fn) });
   }
 
-  function mapCardsIn(colId: string, fn: (cards: KanbanCard[]) => KanbanCard[]) {
-    mapColumns((col) => (col.id === colId ? { ...col, cards: fn(col.cards) } : col));
+  function mapColumns(
+    rowId: string,
+    fn: (col: KanbanColumn) => KanbanColumn,
+  ) {
+    mapRows((row) =>
+      row.id === rowId ? { ...row, columns: row.columns.map(fn) } : row,
+    );
+  }
+
+  function mapCardsIn(
+    rowId: string,
+    colId: string,
+    fn: (cards: KanbanCard[]) => KanbanCard[],
+  ) {
+    mapColumns(rowId, (col) =>
+      col.id === colId ? { ...col, cards: fn(col.cards) } : col,
+    );
   }
 
   // ----- card ops -----
-  function toggleCard(colId: string, cardId: string) {
-    mapCardsIn(colId, (cards) =>
+  function toggleCard(rowId: string, colId: string, cardId: string) {
+    mapCardsIn(rowId, colId, (cards) =>
       cards.map((c) => (c.id === cardId ? { ...c, done: !c.done } : c)),
     );
   }
 
-  function setCardText(colId: string, cardId: string, text: string) {
-    mapCardsIn(colId, (cards) =>
+  function setCardText(rowId: string, colId: string, cardId: string, text: string) {
+    mapCardsIn(rowId, colId, (cards) =>
       cards.map((c) => (c.id === cardId ? { ...c, text } : c)),
     );
   }
 
-  function deleteCard(colId: string, cardId: string) {
-    mapCardsIn(colId, (cards) => cards.filter((c) => c.id !== cardId));
+  function deleteCard(rowId: string, colId: string, cardId: string) {
+    mapCardsIn(rowId, colId, (cards) => cards.filter((c) => c.id !== cardId));
   }
 
-  function addCard(colId: string) {
+  function addCard(rowId: string, colId: string) {
     const card = newCard();
     setJustAddedId(card.id);
-    mapCardsIn(colId, (cards) => [...cards, card]);
+    mapCardsIn(rowId, colId, (cards) => [...cards, card]);
   }
 
   function moveCard(
     cardId: string,
+    fromRowId: string,
     fromColId: string,
-    toColId: string,
-    beforeCardId: string | null,
+    target: DropTarget,
   ) {
-    let moved: KanbanCard | undefined;
-    const stripped = board.columns.map((col) => {
-      if (col.id !== fromColId) return col;
-      moved = col.cards.find((c) => c.id === cardId);
-      return { ...col, cards: col.cards.filter((c) => c.id !== cardId) };
-    });
-    if (!moved) return;
-
-    const columns = stripped.map((col) => {
-      if (col.id !== toColId) return col;
-      const cards = [...col.cards];
-      const idx =
-        beforeCardId === null
-          ? cards.length
-          : cards.findIndex((c) => c.id === beforeCardId);
-      cards.splice(idx === -1 ? cards.length : idx, 0, moved!);
-      return { ...col, cards };
-    });
-
-    commit({ ...board, columns });
+    const next = moveCardInBoard(
+      board,
+      cardId,
+      { rowId: fromRowId, colId: fromColId },
+      target,
+    );
+    if (next !== board) commit(next);
   }
 
-  // ----- column ops -----
-  function setColumnTitle(colId: string, title: string) {
-    mapColumns((col) => (col.id === colId ? { ...col, title } : col));
+  // ----- row / column ops -----
+  function setRowTitle(rowId: string, title: string) {
+    mapRows((row) => (row.id === rowId ? { ...row, title } : row));
   }
 
-  function deleteColumn(colId: string) {
-    commit({ ...board, columns: board.columns.filter((c) => c.id !== colId) });
+  function addRow() {
+    commit({ ...board, rows: [...board.rows, newRow()] });
   }
 
-  function addColumn() {
-    commit({ ...board, columns: [...board.columns, newColumn()] });
+  function setColumnTitle(rowId: string, colId: string, title: string) {
+    mapColumns(rowId, (col) => (col.id === colId ? { ...col, title } : col));
+  }
+
+  function deleteColumn(rowId: string, colId: string) {
+    mapRows((row) =>
+      row.id === rowId
+        ? { ...row, columns: row.columns.filter((c) => c.id !== colId) }
+        : row,
+    );
+  }
+
+  function addColumn(rowId: string) {
+    mapRows((row) =>
+      row.id === rowId ? { ...row, columns: [...row.columns, newColumn()] } : row,
+    );
   }
 
   // ----- drag & drop (pointer 기반: WebView에서 안정적) -----
-  function startDrag(cardId: string, fromColId: string) {
-    draggedRef.current = { cardId, fromColId };
+  function startDrag(cardId: string, fromRowId: string, fromColId: string) {
+    draggedRef.current = { cardId, fromRowId, fromColId };
     setDraggingId(cardId);
+  }
+
+  function findRow(rowId: string): KanbanRow | undefined {
+    return board.rows.find((row) => row.id === rowId);
   }
 
   function computeDropTarget(x: number, y: number): DropTarget | null {
     const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    const rowEl = el?.closest("[data-row-id]") as HTMLElement | null;
     const colEl = el?.closest("[data-col-id]") as HTMLElement | null;
-    if (!colEl) return null;
+    if (!rowEl || !colEl) return null;
+
+    const rowId = rowEl.getAttribute("data-row-id")!;
     const colId = colEl.getAttribute("data-col-id")!;
 
     const cardEl = el?.closest("[data-card-id]") as HTMLElement | null;
-    if (!cardEl) return { colId, beforeCardId: null };
+    if (!cardEl) return { rowId, colId, beforeCardId: null };
 
     const cardId = cardEl.getAttribute("data-card-id")!;
     const rect = cardEl.getBoundingClientRect();
     const isAfter = y > rect.top + rect.height / 2;
-    if (!isAfter) return { colId, beforeCardId: cardId };
+    if (!isAfter) return { rowId, colId, beforeCardId: cardId };
 
-    const col = board.columns.find((c) => c.id === colId);
+    const col = findRow(rowId)?.columns.find((c) => c.id === colId);
     const idx = col ? col.cards.findIndex((c) => c.id === cardId) : -1;
     const next = col && idx >= 0 ? col.cards[idx + 1] : undefined;
-    return { colId, beforeCardId: next ? next.id : null };
+    return { rowId, colId, beforeCardId: next ? next.id : null };
   }
 
   function moveDrag(x: number, y: number) {
@@ -163,9 +192,9 @@ function KanbanBoard({ markdown, onChange }: Props) {
     if (dragged && dropTarget) {
       moveCard(
         dragged.cardId,
+        dragged.fromRowId,
         dragged.fromColId,
-        dropTarget.colId,
-        dropTarget.beforeCardId,
+        dropTarget,
       );
     }
     draggedRef.current = null;
@@ -174,76 +203,109 @@ function KanbanBoard({ markdown, onChange }: Props) {
     setGhostPos(null);
   }
 
-  const boardTitle = board.preamble.match(/^#\s+(.*)$/m)?.[1]?.trim();
   const draggingCard = draggingId
-    ? board.columns.flatMap((c) => c.cards).find((c) => c.id === draggingId)
+    ? board.rows
+        .flatMap((row) => row.columns)
+        .flatMap((col) => col.cards)
+        .find((card) => card.id === draggingId)
     : null;
 
   return (
     <section className="kanban-wrap">
-      {boardTitle && <p className="kanban-board-title">{boardTitle}</p>}
+      <div className={`kanban-rows${draggingId ? " dragging" : ""}`}>
+        {board.rows.map((row) => (
+          <section key={row.id} data-row-id={row.id} className="kanban-row">
+            <header className="kanban-row-header">
+              <input
+                className="kanban-row-title"
+                value={row.title}
+                placeholder="Row 이름"
+                onChange={(e) => setRowTitle(row.id, e.target.value)}
+              />
+            </header>
 
-      <div className={`kanban-board${draggingId ? " dragging" : ""}`}>
-        {board.columns.map((col) => {
-          const isDropCol = dropTarget?.colId === col.id;
-          return (
-            <section
-              key={col.id}
-              data-col-id={col.id}
-              className={`kanban-column${isDropCol ? " drag-over" : ""}`}
-            >
-              <header className="kanban-col-header">
-                <input
-                  className="kanban-col-title"
-                  value={col.title}
-                  placeholder="컬럼 이름"
-                  onChange={(e) => setColumnTitle(col.id, e.target.value)}
-                />
-                <span className="kanban-col-count">{col.cards.length}</span>
-                <button
-                  className="kanban-col-delete"
-                  title="컬럼 삭제"
-                  onClick={() => deleteColumn(col.id)}
-                >
-                  ×
-                </button>
-              </header>
+            {row.preface && <p className="kanban-row-preface">{row.preface}</p>}
 
-              {col.note && <p className="kanban-col-note">{col.note}</p>}
+            <div className="kanban-board">
+              {row.columns.map((col) => {
+                const isDropCol =
+                  dropTarget?.rowId === row.id && dropTarget?.colId === col.id;
+                return (
+                  <section
+                    key={col.id}
+                    data-col-id={col.id}
+                    className={`kanban-column${isDropCol ? " drag-over" : ""}`}
+                  >
+                    <header className="kanban-col-header">
+                      <input
+                        className="kanban-col-title"
+                        value={col.title}
+                        placeholder="컬럼 이름"
+                        onChange={(e) =>
+                          setColumnTitle(row.id, col.id, e.target.value)
+                        }
+                      />
+                      <span className="kanban-col-count">{col.cards.length}</span>
+                      <button
+                        className="kanban-col-delete"
+                        title="컬럼 삭제"
+                        onClick={() => deleteColumn(row.id, col.id)}
+                      >
+                        ×
+                      </button>
+                    </header>
 
-              <ul
-                className={`kanban-cards${
-                  isDropCol && dropTarget?.beforeCardId === null ? " drop-end" : ""
-                }`}
-              >
-                {col.cards.map((card) => (
-                  <KanbanCardItem
-                    key={card.id}
-                    card={card}
-                    isDragging={draggingId === card.id}
-                    isDropBefore={isDropCol && dropTarget?.beforeCardId === card.id}
-                    autoFocus={card.id === justAddedId}
-                    onToggle={() => toggleCard(col.id, card.id)}
-                    onTextChange={(t) => setCardText(col.id, card.id, t)}
-                    onDelete={() => deleteCard(col.id, card.id)}
-                    onEnter={() => addCard(col.id)}
-                    onFocusText={() => setJustAddedId(null)}
-                    onDragStart={() => startDrag(card.id, col.id)}
-                    onDragMove={moveDrag}
-                    onDragEnd={endDrag}
-                  />
-                ))}
-              </ul>
+                    {col.note && <p className="kanban-col-note">{col.note}</p>}
 
-              <button className="kanban-add-card" onClick={() => addCard(col.id)}>
-                + 카드 추가
+                    <ul
+                      className={`kanban-cards${
+                        isDropCol && dropTarget?.beforeCardId === null
+                          ? " drop-end"
+                          : ""
+                      }`}
+                    >
+                      {col.cards.map((card) => (
+                        <KanbanCardItem
+                          key={card.id}
+                          card={card}
+                          isDragging={draggingId === card.id}
+                          isDropBefore={
+                            isDropCol && dropTarget?.beforeCardId === card.id
+                          }
+                          autoFocus={card.id === justAddedId}
+                          onToggle={() => toggleCard(row.id, col.id, card.id)}
+                          onTextChange={(t) =>
+                            setCardText(row.id, col.id, card.id, t)
+                          }
+                          onDelete={() => deleteCard(row.id, col.id, card.id)}
+                          onEnter={() => addCard(row.id, col.id)}
+                          onFocusText={() => setJustAddedId(null)}
+                          onDragStart={() => startDrag(card.id, row.id, col.id)}
+                          onDragMove={moveDrag}
+                          onDragEnd={endDrag}
+                        />
+                      ))}
+                    </ul>
+
+                    <button
+                      className="kanban-add-card"
+                      onClick={() => addCard(row.id, col.id)}
+                    >
+                      + 카드 추가
+                    </button>
+                  </section>
+                );
+              })}
+
+              <button className="kanban-add-column" onClick={() => addColumn(row.id)}>
+                + 컬럼
               </button>
-            </section>
-          );
-        })}
+            </div>
+          </section>
+        ))}
 
-        <button className="kanban-add-column" onClick={addColumn}>
-          + 컬럼
+        <button className="kanban-add-row" onClick={addRow}>
+          + Row
         </button>
       </div>
 
@@ -300,56 +362,82 @@ function KanbanCardItem({
         (isDropBefore ? " drop-before" : "")
       }
     >
-      <span
-        ref={handleRef}
-        className="kanban-card-handle"
-        title="드래그해 이동"
-        onPointerDown={(e) => {
-          if (e.button !== 0) return;
-          e.preventDefault();
-          handleRef.current?.setPointerCapture(e.pointerId);
-          onDragStart();
-        }}
-        onPointerMove={(e) => onDragMove(e.clientX, e.clientY)}
-        onPointerUp={(e) => {
-          if (handleRef.current?.hasPointerCapture(e.pointerId)) {
-            handleRef.current.releasePointerCapture(e.pointerId);
-          }
-          onDragEnd();
-        }}
-        onPointerCancel={(e) => {
-          if (handleRef.current?.hasPointerCapture(e.pointerId)) {
-            handleRef.current.releasePointerCapture(e.pointerId);
-          }
-          onDragEnd();
-        }}
-      >
-        ⠿
-      </span>
-      <input
-        type="checkbox"
-        className="kanban-card-check"
-        checked={card.done}
-        onChange={onToggle}
-      />
-      <input
-        className="kanban-card-text"
-        value={card.text}
-        placeholder="할 일 입력…"
-        autoFocus={autoFocus}
-        onFocus={onFocusText}
-        onChange={(e) => onTextChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
+      <div className="kanban-card-main">
+        <span
+          ref={handleRef}
+          className="kanban-card-handle"
+          title="드래그해 이동"
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
             e.preventDefault();
-            e.currentTarget.blur();
-            onEnter();
-          }
-        }}
-      />
-      <button className="kanban-card-delete" title="카드 삭제" onClick={onDelete}>
-        ×
-      </button>
+            handleRef.current?.setPointerCapture(e.pointerId);
+            onDragStart();
+          }}
+          onPointerMove={(e) => onDragMove(e.clientX, e.clientY)}
+          onPointerUp={(e) => {
+            if (handleRef.current?.hasPointerCapture(e.pointerId)) {
+              handleRef.current.releasePointerCapture(e.pointerId);
+            }
+            onDragEnd();
+          }}
+          onPointerCancel={(e) => {
+            if (handleRef.current?.hasPointerCapture(e.pointerId)) {
+              handleRef.current.releasePointerCapture(e.pointerId);
+            }
+            onDragEnd();
+          }}
+        >
+          ⠿
+        </span>
+        <input
+          type="checkbox"
+          className="kanban-card-check"
+          checked={card.done}
+          onChange={onToggle}
+        />
+        <input
+          className="kanban-card-text"
+          value={card.text}
+          placeholder="할 일 입력…"
+          autoFocus={autoFocus}
+          onFocus={onFocusText}
+          onChange={(e) => onTextChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.currentTarget.blur();
+              onEnter();
+            }
+          }}
+        />
+        <button className="kanban-card-delete" title="카드 삭제" onClick={onDelete}>
+          ×
+        </button>
+      </div>
+
+      {card.children.length > 0 && (
+        <ul className="kanban-subitems">
+          {card.children.map((child) => (
+            <Subitem key={child.id} item={child} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function Subitem({ item }: { item: KanbanSubitem }) {
+  return (
+    <li className={`kanban-subitem${item.done ? " done" : ""}`}>
+      <span className="kanban-subitem-check">{item.done ? "✓" : "□"}</span>
+      <span className="kanban-subitem-text">{item.text}</span>
+      {item.children.length > 0 && (
+        <ul className="kanban-subitems nested">
+          {item.children.map((child) => (
+            <Subitem key={child.id} item={child} />
+          ))}
+        </ul>
+      )}
     </li>
   );
 }

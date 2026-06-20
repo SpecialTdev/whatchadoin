@@ -9,7 +9,13 @@ import RightSidebar from "../components/RightSidebar";
 import WorkView from "../components/WorkView";
 import ReportView from "../components/ReportView";
 import SettingsView from "../components/SettingsView";
-import { parseMarkdown, serializeBoard, newCard, newColumn } from "../lib/kanban";
+import {
+  parseMarkdown,
+  serializeBoard,
+  newCard,
+  newColumn,
+  newRow,
+} from "../lib/kanban";
 import { DEFAULT_NOTE, loadNote } from "../lib/note";
 import {
   fetchEvents,
@@ -31,9 +37,6 @@ const MIN_SEC = 60;
 const MAX_SEC = 1800;
 const DEFAULT_SEC = 60;
 const STORAGE_KEY = "checkin.intervalSec";
-const COLUMN_HEADING_RE = /^##\s+/;
-const CHECKBOX_TASK_RE = /^\s*[-*]\s+\[([ xX])\]\s?(.*)$/;
-const BULLET_TASK_RE = /^\s*[-*]\s+(.*)$/;
 
 // 리포트 하루 경계 시각(시): 자정~오전 11시. 이 시각 전 이벤트는 전날 업무일로 묶인다.
 const MIN_BOUNDARY = 0;
@@ -143,33 +146,16 @@ function readCssPixelValue(style: CSSStyleDeclaration, name: string): number {
 function deriveTasks(note: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
+  const board = parseMarkdown(note);
 
-  let insideColumn = false;
-  for (const raw of note.split("\n")) {
-    if (COLUMN_HEADING_RE.test(raw)) {
-      insideColumn = true;
-      continue;
-    }
-    if (!insideColumn) continue;
-
-    const checkbox = raw.match(CHECKBOX_TASK_RE);
-    if (checkbox) {
-      if (checkbox[1].toLowerCase() !== "x") {
-        const task = checkbox[2].trim();
-        if (task && !seen.has(task)) {
+  for (const row of board.rows) {
+    for (const col of row.columns) {
+      for (const card of col.cards) {
+        const task = card.text.trim();
+        if (!card.done && task && !seen.has(task)) {
           seen.add(task);
           out.push(task);
         }
-      }
-      continue;
-    }
-
-    const bullet = raw.match(BULLET_TASK_RE);
-    if (bullet) {
-      const task = bullet[1].trim();
-      if (task && !seen.has(task)) {
-        seen.add(task);
-        out.push(task);
       }
     }
   }
@@ -197,9 +183,14 @@ function useStableStringArray(values: string[]): string[] {
 // 체크인에서 입력한 새 작업을 노트의 '진행 중'(없으면 첫 컬럼/신규 컬럼)에 추가한다.
 function appendTask(note: string, task: string): string {
   const board = parseMarkdown(note);
-  if (board.columns.length === 0) board.columns.push(newColumn("진행 중"));
-  const target =
-    board.columns.find((c) => c.title.includes("진행")) ?? board.columns[0];
+  if (board.rows.length === 0) board.rows.push(newRow());
+  let target = board.rows
+    .flatMap((row) => row.columns)
+    .find((col) => col.title.includes("진행"));
+  if (!target) {
+    target = newColumn("진행 중");
+    board.rows[0].columns.push(target);
+  }
   target.cards.push(newCard(task));
   return serializeBoard(board);
 }
@@ -578,6 +569,48 @@ function App() {
           ? `근무 중 · ${activeTask}`
           : "근무 중";
 
+  const workSessionControls = (
+    <div className={`work-session-controls ${checkInMode}`}>
+      <span className="work-session-label">{sessionLabel}</span>
+      {checkInMode === "off" ? (
+        <button
+          className="work-session-btn primary"
+          type="button"
+          onClick={() => runCheckInStatusCommand("clock_in")}
+        >
+          출근
+        </button>
+      ) : (
+        <>
+          {checkInMode === "break" ? (
+            <button
+              className="work-session-btn primary"
+              type="button"
+              onClick={() => runCheckInStatusCommand("end_break")}
+            >
+              휴식 종료
+            </button>
+          ) : (
+            <button
+              className="work-session-btn"
+              type="button"
+              onClick={openCheckIn}
+            >
+              체크인
+            </button>
+          )}
+          <button
+            className="work-session-btn danger"
+            type="button"
+            onClick={() => runCheckInStatusCommand("clock_out")}
+          >
+            퇴근
+          </button>
+        </>
+      )}
+    </div>
+  );
+
   // report 탭 진입 시 이벤트를 로드한다 (리포트는 회고용이라 진입 시 새로고침으로 충분).
   useEffect(() => {
     if (tab !== "report") return;
@@ -690,6 +723,7 @@ function App() {
             tasks={tasks}
             activeTask={activeTask}
             focusSignal={noteFocusNonce}
+            footerAction={workSessionControls}
           />
         ) : tab === "report" ? (
           <ReportView
@@ -727,46 +761,6 @@ function App() {
       )}
 
       <RightSidebar className={rightSidebarVisible ? "" : "hidden"} />
-
-      <div className={`work-session-controls ${checkInMode}`}>
-        <span className="work-session-label">{sessionLabel}</span>
-        {checkInMode === "off" ? (
-          <button
-            className="work-session-btn primary"
-            type="button"
-            onClick={() => runCheckInStatusCommand("clock_in")}
-          >
-            출근
-          </button>
-        ) : (
-          <>
-            {checkInMode === "break" ? (
-              <button
-                className="work-session-btn primary"
-                type="button"
-                onClick={() => runCheckInStatusCommand("end_break")}
-              >
-                휴식 종료
-              </button>
-            ) : (
-              <button
-                className="work-session-btn"
-                type="button"
-                onClick={openCheckIn}
-              >
-                체크인
-              </button>
-            )}
-            <button
-              className="work-session-btn danger"
-              type="button"
-              onClick={() => runCheckInStatusCommand("clock_out")}
-            >
-              퇴근
-            </button>
-          </>
-        )}
-      </div>
     </div>
   );
 }

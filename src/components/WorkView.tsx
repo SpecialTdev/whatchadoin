@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import KanbanBoard from "./KanbanBoard";
 
 type Focus = "note" | "kanban";
@@ -14,6 +15,7 @@ interface Props {
   activeTask: string | null;
   /** 값이 바뀌면(체크인 '직접 입력' 등) Note 패널을 활성화하고 포커스한다 */
   focusSignal?: number;
+  footerAction?: ReactNode;
 }
 
 function WorkView({
@@ -23,6 +25,7 @@ function WorkView({
   tasks,
   activeTask,
   focusSignal,
+  footerAction,
 }: Props) {
   const [focus, setFocus] = useState<Focus>("note");
   const [draftNote, setDraftNote] = useState(note);
@@ -166,12 +169,7 @@ function WorkView({
         )}
       </div>
 
-      <div className="editor-footer">
-        <span className="hint">
-          Note와 Kanban은 같은 마크다운을 사용합니다. ## 제목은 컬럼, - [ ] 항목은
-          카드. 카드는 왼쪽 핸들로 드래그해 이동.
-        </span>
-      </div>
+      {footerAction && <div className="editor-footer">{footerAction}</div>}
     </div>
   );
 }
