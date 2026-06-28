@@ -28,6 +28,14 @@ export function resolveHorizontalTargetIndex(
   return Math.min(currentIndex, targetItemCount - 1);
 }
 
+export function resolveCrossRowVerticalTargetIndex(
+  key: "ArrowUp" | "ArrowDown",
+  targetItemCount: number,
+): number | null {
+  if (targetItemCount <= 0) return null;
+  return key === "ArrowUp" ? targetItemCount - 1 : 0;
+}
+
 function focusInput(input: HTMLInputElement | null | undefined): boolean {
   if (!input) return false;
   input.focus();
@@ -70,9 +78,48 @@ export function useKanbanKeyboardNavigation() {
         event.key,
         items.length,
       );
-      if (targetIndex === null) return false;
+      if (targetIndex !== null) {
+        event.preventDefault();
+        return focusInput(items[targetIndex]);
+      }
+
+      const rows = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-row-id]"),
+      );
+      const currentRowIndex = rows.indexOf(rowEl as HTMLElement);
+      if (currentRowIndex < 0) return false;
+
+      const columns = Array.from(
+        rowEl.querySelectorAll<HTMLElement>("[data-col-id]"),
+      );
+      const currentColIndex = columns.indexOf(colEl as HTMLElement);
+      if (currentColIndex < 0) return false;
+
+      const targetRowIndex =
+        currentRowIndex + (event.key === "ArrowUp" ? -1 : 1);
+      const targetRow = rows[targetRowIndex];
+      const targetCol =
+        targetRow?.querySelectorAll<HTMLElement>("[data-col-id]")[
+          currentColIndex
+        ];
+      if (!targetCol) return false;
+
+      const targetItems = itemInputsIn(targetCol);
+      const crossRowTargetIndex = resolveCrossRowVerticalTargetIndex(
+        event.key,
+        targetItems.length,
+      );
+
       event.preventDefault();
-      return focusInput(items[targetIndex]);
+      if (crossRowTargetIndex !== null) {
+        return focusInput(targetItems[crossRowTargetIndex]);
+      }
+
+      return focusInput(
+        targetCol.querySelector<HTMLInputElement>(
+          'input[data-kanban-focus="column-title"]',
+        ),
+      );
     }
 
     const columns = Array.from(rowEl.querySelectorAll<HTMLElement>("[data-col-id]"));

@@ -9,6 +9,7 @@ import {
   serializeBoard,
 } from "./kanban";
 import {
+  resolveCrossRowVerticalTargetIndex,
   resolveHorizontalTargetIndex,
   resolveVerticalTargetIndex,
 } from "../components/kanban/useKanbanKeyboardNavigation";
@@ -97,5 +98,12 @@ describe("kanban keyboard navigation helpers", () => {
     expect(resolveHorizontalTargetIndex(2, 5)).toBe(2);
     expect(resolveHorizontalTargetIndex(4, 2)).toBe(1);
     expect(resolveHorizontalTargetIndex(0, 0)).toBeNull();
+  });
+
+  it("resolves cross-row vertical movement at column boundaries", () => {
+    expect(resolveCrossRowVerticalTargetIndex("ArrowUp", 3)).toBe(2);
+    expect(resolveCrossRowVerticalTargetIndex("ArrowDown", 3)).toBe(0);
+    expect(resolveCrossRowVerticalTargetIndex("ArrowUp", 0)).toBeNull();
+    expect(resolveCrossRowVerticalTargetIndex("ArrowDown", 0)).toBeNull();
   });
 });
