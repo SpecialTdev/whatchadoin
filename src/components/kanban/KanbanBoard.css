@@ -103,6 +103,7 @@
   font-variant-numeric: tabular-nums;
 }
 
+.kanban-row-delete,
 .kanban-col-delete,
 .kanban-card-delete,
 .kanban-subitem-delete {
@@ -117,6 +118,8 @@
   transition: opacity 0.12s, color 0.12s;
 }
 
+.kanban-row-header:hover .kanban-row-delete,
+.kanban-row-header:focus-within .kanban-row-delete,
 .kanban-col-header:hover .kanban-col-delete,
 .kanban-card:hover .kanban-card-delete,
 .kanban-subitem:hover .kanban-subitem-delete,
@@ -124,6 +127,7 @@
   opacity: 0.7;
 }
 
+.kanban-row-delete:hover,
 .kanban-col-delete:hover,
 .kanban-card-delete:hover,
 .kanban-subitem-delete:hover {
@@ -407,4 +411,3 @@
   color: var(--accent);
   background: var(--accent-soft);
 }
-

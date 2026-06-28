@@ -132,6 +132,10 @@ function KanbanBoard({ markdown, onChange }: Props) {
     commit({ ...board, rows: [...board.rows, newRow()] });
   }
 
+  function deleteRow(rowId: string) {
+    commit({ ...board, rows: board.rows.filter((row) => row.id !== rowId) });
+  }
+
   function setColumnTitle(rowId: string, colId: string, title: string) {
     mapColumns(rowId, (col) => (col.id === colId ? { ...col, title } : col));
   }
@@ -162,6 +166,13 @@ function KanbanBoard({ markdown, onChange }: Props) {
                 placeholder="Row 이름"
                 onChange={(e) => setRowTitle(row.id, e.target.value)}
               />
+              <button
+                className="kanban-row-delete"
+                title="Row 삭제"
+                onClick={() => deleteRow(row.id)}
+              >
+                ×
+              </button>
             </header>
 
             {row.preface && <p className="kanban-row-preface">{row.preface}</p>}
