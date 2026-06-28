@@ -10,11 +10,8 @@ import WorkView from "../components/WorkView";
 import ReportView from "../components/ReportView";
 import SettingsView from "../components/SettingsView";
 import {
-  parseMarkdown,
-  serializeBoard,
-  newCard,
-  newColumn,
-  newRow,
+  appendTaskToProgress,
+  extractOpenTasks,
 } from "../lib/kanban";
 import { DEFAULT_NOTE, loadNote } from "../lib/note";
 import {
@@ -142,27 +139,6 @@ function readCssPixelValue(style: CSSStyleDeclaration, name: string): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-// 노트(todo)에서 체크인 후보를 뽑는다: 미완료·비어있지 않은 항목, 중복 제거.
-function deriveTasks(note: string): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  const board = parseMarkdown(note);
-
-  for (const row of board.rows) {
-    for (const col of row.columns) {
-      for (const card of col.cards) {
-        const task = card.text.trim();
-        if (!card.done && task && !seen.has(task)) {
-          seen.add(task);
-          out.push(task);
-        }
-      }
-    }
-  }
-
-  return out;
-}
-
 function sameStringArray(a: string[], b: string[]): boolean {
   if (a === b) return true;
   if (a.length !== b.length) return false;
@@ -178,21 +154,6 @@ function useStableStringArray(values: string[]): string[] {
     if (!sameStringArray(ref.current, values)) ref.current = values;
     return ref.current;
   }, [values]);
-}
-
-// 체크인에서 입력한 새 작업을 노트의 '진행 중'(없으면 첫 컬럼/신규 컬럼)에 추가한다.
-function appendTask(note: string, task: string): string {
-  const board = parseMarkdown(note);
-  if (board.rows.length === 0) board.rows.push(newRow());
-  let target = board.rows
-    .flatMap((row) => row.columns)
-    .find((col) => col.title.includes("진행"));
-  if (!target) {
-    target = newColumn("진행 중");
-    board.rows[0].columns.push(target);
-  }
-  target.cards.push(newCard(task));
-  return serializeBoard(board);
 }
 
 function App() {
@@ -280,7 +241,7 @@ function App() {
   }, []);
 
   // 체크인 후보 = 노트의 실제 todo 항목
-  const derivedTasks = useMemo(() => deriveTasks(note), [note]);
+  const derivedTasks = useMemo(() => extractOpenTasks(note), [note]);
   const tasks = useStableStringArray(derivedTasks);
 
   const tasksRef = useRef(tasks);
@@ -444,9 +405,9 @@ function App() {
     // 노트에 없던 새 작업이면 실제 todo로 편입
     setNote((prev) => {
       const latest = noteRef.current || prev;
-      const next = deriveTasks(latest).includes(task)
+      const next = extractOpenTasks(latest).includes(task)
         ? latest
-        : appendTask(latest, task);
+        : appendTaskToProgress(latest, task);
       noteRef.current = next;
       return next;
     });
