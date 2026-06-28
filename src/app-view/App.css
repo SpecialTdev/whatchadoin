@@ -1620,12 +1620,108 @@ body.right-sidebar-resizing * {
   border-color: var(--accent);
 }
 
+.checkin-memo-section {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  transition: grid-template-rows 0.16s ease, flex-grow 0.16s ease;
+}
+
+.checkin-memo-section.collapsed {
+  grid-template-rows: auto 0fr;
+  flex: 0 0 auto;
+}
+
+.checkin-memo-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.checkin-memo-rule {
+  height: 1px;
+  min-width: 1.5rem;
+  flex: 1 1 1.5rem;
+  background: var(--border);
+}
+
+.checkin-memo-divider-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  max-width: min(72%, 24rem);
+  min-width: 0;
+  padding: 0.16rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--surface);
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+
+.checkin-memo-divider:hover .checkin-memo-divider-content {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.checkin-memo-divider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.checkin-memo-title {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.checkin-memo-summary {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.checkin-memo-chevron {
+  flex: 0 0 auto;
+  width: 0.75rem;
+  color: currentColor;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.checkin-memo-body {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 0.14s ease;
+}
+
+.checkin-memo-section.collapsed .checkin-memo-body {
+  opacity: 0;
+}
+
 .checkin-memo-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.75rem;
-  flex: 1;
+  height: 100%;
   min-height: 0;
+  padding: 0.75rem;
 }
 
 .checkin-memo-pane {
@@ -1843,6 +1939,13 @@ body.right-sidebar-resizing * {
 
   .checkin-memo-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .checkin-memo-section,
+  .checkin-memo-body {
+    transition: none;
   }
 }
 

@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { CheckInStatus } from "./lib/checkin";
 import { latestMemoByTask } from "./lib/checkinMemo";
@@ -12,6 +13,10 @@ interface CheckInData extends CheckInStatus {
   tasks: string[];
 }
 
+const MEMO_COLLAPSED_STORAGE_KEY = "checkin:memo-collapsed";
+const CHECKIN_MEMO_HEIGHT_DELTA = 220;
+const CHECKIN_MIN_HEIGHT = 320;
+
 function CheckInWindow() {
   const [data, setData] = useState<CheckInData | null>(null);
   const [selected, setSelected] = useState<string>("");
@@ -20,6 +25,14 @@ function CheckInWindow() {
   const [memoByTask, setMemoByTask] = useState<Record<string, string>>({});
   const [memoDirty, setMemoDirty] = useState(false);
   const [showNewTaskInput, setShowNewTaskInput] = useState(false);
+  const [memoCollapsed, setMemoCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem(MEMO_COLLAPSED_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const initialCollapsedResizeAppliedRef = useRef(false);
 
   function fillMemoForTask(task: string, memos = memoByTask) {
     setMemo(task ? memos[task] ?? "" : "");
@@ -39,6 +52,34 @@ function CheckInWindow() {
   function handleMemoChange(value: string) {
     setMemo(value);
     setMemoDirty(true);
+  }
+
+  async function offsetCheckInWindowHeight(delta: number) {
+    const win = getCurrentWindow();
+    const [innerSize, scaleFactor] = await Promise.all([win.innerSize(), win.scaleFactor()]);
+    const logicalSize = innerSize.toLogical(scaleFactor);
+    await win.setSize(
+      new LogicalSize(logicalSize.width, Math.max(CHECKIN_MIN_HEIGHT, logicalSize.height + delta)),
+    );
+  }
+
+  async function resizeMemoWindow(collapsed: boolean) {
+    try {
+      await offsetCheckInWindowHeight(collapsed ? -CHECKIN_MEMO_HEIGHT_DELTA : CHECKIN_MEMO_HEIGHT_DELTA);
+    } catch (e) {
+      console.error("[CheckInWindow] resize failed:", e);
+    }
+  }
+
+  function toggleMemoCollapsed() {
+    const next = !memoCollapsed;
+    setMemoCollapsed(next);
+    try {
+      window.localStorage.setItem(MEMO_COLLAPSED_STORAGE_KEY, String(next));
+    } catch (e) {
+      console.error("[CheckInWindow] memo collapse preference save failed:", e);
+    }
+    resizeMemoWindow(next);
   }
 
   useEffect(() => {
@@ -110,6 +151,22 @@ function CheckInWindow() {
       unlisteners.forEach((unlisten) => unlisten());
     };
   }, []);
+
+  useEffect(() => {
+    if (data?.mode !== "working") return;
+    if (!memoCollapsed || initialCollapsedResizeAppliedRef.current) return;
+    initialCollapsedResizeAppliedRef.current = true;
+
+    async function applyInitialCollapsedHeight() {
+      try {
+        await offsetCheckInWindowHeight(-CHECKIN_MEMO_HEIGHT_DELTA);
+      } catch (e) {
+        console.error("[CheckInWindow] initial collapsed resize failed:", e);
+      }
+    }
+
+    applyInitialCollapsedHeight();
+  }, [data?.mode, memoCollapsed]);
 
   function applyStatus(status: CheckInStatus) {
     setData((prev) =>
@@ -234,6 +291,12 @@ function CheckInWindow() {
   }
 
   const submitDisabled = showNewTaskInput ? !newTask.trim() : !selected;
+  const memoSnippet = memo.trim().replace(/\s+/g, " ");
+  const memoSummary = memoSnippet
+    ? memoSnippet.length > 36
+      ? `${memoSnippet.slice(0, 36)}...`
+      : memoSnippet
+    : "비어 있음";
 
   return (
     <div className="checkin-window">
@@ -266,27 +329,54 @@ function CheckInWindow() {
         />
       )}
 
-      <div className="checkin-memo-grid">
-        <section className="checkin-memo-pane">
-          <label className="checkin-memo-label" htmlFor="checkin-memo">
-            메모
-          </label>
-          <textarea
-            id="checkin-memo"
-            className="checkin-memo-editor"
-            placeholder="지금 작업 중인 맥락을 마크다운으로 남기기..."
-            value={memo}
-            onChange={(e) => handleMemoChange(e.target.value)}
-            spellCheck={false}
-          />
-        </section>
-        <section className="checkin-memo-pane preview">
-          <span className="checkin-memo-label">미리보기</span>
-          <div className="markdown-preview">
-            {renderMarkdown(memo, "메모를 쓰면 여기에 미리보기가 표시됩니다.")}
+      <section className={`checkin-memo-section${memoCollapsed ? " collapsed" : ""}`}>
+        <button
+          className="checkin-memo-divider"
+          type="button"
+          onClick={toggleMemoCollapsed}
+          aria-expanded={!memoCollapsed}
+          aria-controls="checkin-memo-body"
+        >
+          <span className="checkin-memo-rule" aria-hidden="true" />
+          <span className="checkin-memo-divider-content">
+            <span className="checkin-memo-title">메모</span>
+            <span className="checkin-memo-summary">{memoSummary}</span>
+            <span className="checkin-memo-chevron" aria-hidden="true">
+              {memoCollapsed ? "˅" : "˄"}
+            </span>
+          </span>
+          <span className="checkin-memo-rule" aria-hidden="true" />
+        </button>
+
+        <div
+          id="checkin-memo-body"
+          className="checkin-memo-body"
+          aria-hidden={memoCollapsed}
+        >
+          <div className="checkin-memo-grid">
+            <section className="checkin-memo-pane">
+              <label className="checkin-memo-label" htmlFor="checkin-memo">
+                작성
+              </label>
+              <textarea
+                id="checkin-memo"
+                className="checkin-memo-editor"
+                placeholder="지금 작업 중인 맥락을 마크다운으로 남기기..."
+                value={memo}
+                onChange={(e) => handleMemoChange(e.target.value)}
+                spellCheck={false}
+                tabIndex={memoCollapsed ? -1 : undefined}
+              />
+            </section>
+            <section className="checkin-memo-pane preview">
+              <span className="checkin-memo-label">미리보기</span>
+              <div className="markdown-preview">
+                {renderMarkdown(memo, "메모를 쓰면 여기에 미리보기가 표시됩니다.")}
+              </div>
+            </section>
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
 
       <div className="checkin-actions">
         {!showNewTaskInput ? (

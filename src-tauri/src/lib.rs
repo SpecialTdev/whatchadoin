@@ -196,7 +196,7 @@ fn build_checkin_window(app: &AppHandle) -> tauri::Result<()> {
     let win = WebviewWindowBuilder::new(app, "checkin", WebviewUrl::App(Default::default()))
         .title("지금 뭐 하고 있어?")
         .inner_size(760.0, 560.0)
-        .min_inner_size(520.0, 420.0)
+        .min_inner_size(520.0, 320.0)
         .center()
         .always_on_top(true)
         .resizable(true)
