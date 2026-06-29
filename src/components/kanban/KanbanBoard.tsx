@@ -38,6 +38,7 @@ function KanbanBoard({ markdown, onChange }: Props) {
     ghostPos,
     moveDrag,
     startCardDrag,
+    startColumnDrag,
     startSubitemDrag,
   } = useKanbanDrag(board, commit);
   const { handleArrowNavigation } = useKanbanKeyboardNavigation();
@@ -157,126 +158,176 @@ function KanbanBoard({ markdown, onChange }: Props) {
   return (
     <section className="kanban-wrap">
       <div className={`kanban-rows${draggingId ? " dragging" : ""}`}>
-        {board.rows.map((row) => (
-          <section key={row.id} data-row-id={row.id} className="kanban-row">
-            <header className="kanban-row-header">
-              <input
-                className="kanban-row-title"
-                value={row.title}
-                placeholder="Row 이름"
-                onChange={(e) => setRowTitle(row.id, e.target.value)}
-              />
-              <button
-                className="kanban-row-delete"
-                title="Row 삭제"
-                onClick={() => deleteRow(row.id)}
-              >
-                ×
-              </button>
-            </header>
+        {board.rows.map((row) => {
+          const isColumnDropEnd =
+            dropTarget?.kind === "column" &&
+            dropTarget.rowId === row.id &&
+            dropTarget.beforeColId === null;
 
-            {row.preface && <p className="kanban-row-preface">{row.preface}</p>}
+          return (
+            <section key={row.id} data-row-id={row.id} className="kanban-row">
+              <header className="kanban-row-header">
+                <input
+                  className="kanban-row-title"
+                  value={row.title}
+                  placeholder="Row 이름"
+                  onChange={(e) => setRowTitle(row.id, e.target.value)}
+                />
+                <button
+                  className="kanban-row-delete"
+                  title="Row 삭제"
+                  onClick={() => deleteRow(row.id)}
+                >
+                  ×
+                </button>
+              </header>
 
-            <div className="kanban-board">
-              {row.columns.map((col) => {
-                const isDropCol =
-                  dropTarget?.rowId === row.id && dropTarget?.colId === col.id;
-                return (
-                  <section
-                    key={col.id}
-                    data-col-id={col.id}
-                    className={`kanban-column${isDropCol ? " drag-over" : ""}`}
-                  >
-                    <header className="kanban-col-header">
-                      <input
-                        data-kanban-focus="column-title"
-                        className="kanban-col-title"
-                        value={col.title}
-                        placeholder="컬럼 이름"
-                        onChange={(e) =>
-                          setColumnTitle(row.id, col.id, e.target.value)
-                        }
-                        onKeyDown={handleArrowNavigation}
-                      />
-                      <span className="kanban-col-count">{col.cards.length}</span>
-                      <button
-                        className="kanban-col-delete"
-                        title="컬럼 삭제"
-                        onClick={() => deleteColumn(row.id, col.id)}
-                      >
-                        ×
-                      </button>
-                    </header>
+              {row.preface && <p className="kanban-row-preface">{row.preface}</p>}
 
-                    {col.note && <p className="kanban-col-note">{col.note}</p>}
-
-                    <ul
-                      className={`kanban-cards${
-                        isDropCol &&
-                        dropTarget?.kind === "card" &&
-                        dropTarget.beforeCardId === null
-                          ? " drop-end"
-                          : ""
-                      }`}
+              <div className="kanban-board">
+                {row.columns.map((col) => {
+                  const isDropCol =
+                    (dropTarget?.kind === "card" ||
+                      dropTarget?.kind === "subitem") &&
+                    dropTarget?.rowId === row.id &&
+                    dropTarget?.colId === col.id;
+                  const isColumnDropBefore =
+                    dropTarget?.kind === "column" &&
+                    dropTarget.rowId === row.id &&
+                    dropTarget.beforeColId === col.id;
+                  return (
+                    <section
+                      key={col.id}
+                      data-col-id={col.id}
+                      className={
+                        `kanban-column${isDropCol ? " drag-over" : ""}` +
+                        `${draggingId === col.id ? " dragging" : ""}` +
+                        `${isColumnDropBefore ? " column-drop-before" : ""}`
+                      }
                     >
-                      {col.cards.map((card) => (
-                        <KanbanCardItem
-                          key={card.id}
-                          card={card}
-                          isDragging={draggingId === card.id}
-                          isDropBefore={
-                            isDropCol &&
-                            dropTarget?.kind === "card" &&
-                            dropTarget.beforeCardId === card.id
+                      <header className="kanban-col-header">
+                        <span
+                          className="kanban-col-handle"
+                          title="드래그해 컬럼 이동"
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            e.preventDefault();
+                            e.currentTarget.setPointerCapture(e.pointerId);
+                            startColumnDrag(col.id, row.id);
+                          }}
+                          onPointerMove={(e) => moveDrag(e.clientX, e.clientY)}
+                          onPointerUp={(e) => {
+                            if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                              e.currentTarget.releasePointerCapture(e.pointerId);
+                            }
+                            endDrag();
+                          }}
+                          onPointerCancel={(e) => {
+                            if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                              e.currentTarget.releasePointerCapture(e.pointerId);
+                            }
+                            endDrag();
+                          }}
+                        >
+                          ⠿
+                        </span>
+                        <input
+                          data-kanban-focus="column-title"
+                          className="kanban-col-title"
+                          value={col.title}
+                          placeholder="컬럼 이름"
+                          onChange={(e) =>
+                            setColumnTitle(row.id, col.id, e.target.value)
                           }
-                          isSubitemDrop={
-                            isDropCol &&
-                            dropTarget?.kind === "subitem" &&
-                            dropTarget.cardId === card.id &&
-                            dropTarget.parentSubitemId === null &&
-                            dropTarget.beforeSubitemId === null
-                          }
-                          focusRequest={focusRequest}
-                          onFocusHandled={() => setFocusRequest(null)}
-                          onToggle={() => toggleCard(row.id, col.id, card.id)}
-                          onTextChange={(t) =>
-                            setCardText(row.id, col.id, card.id, t)
-                          }
-                          onDelete={() => deleteCard(row.id, col.id, card.id)}
-                          onEnter={() => addCard(row.id, col.id, card.id)}
-                          onTab={() => handleCardTab(card.id)}
-                          onDragStart={() => startCardDrag(card.id, row.id, col.id)}
-                          onDragMove={moveDrag}
-                          onDragEnd={endDrag}
-                          draggingId={draggingId}
-                          dropTarget={dropTarget}
-                          onSubitemToggle={toggleSubitem}
-                          onSubitemTextChange={setSubitemText}
-                          onSubitemDelete={deleteSubitem}
-                          onSubitemEnter={handleSubitemEnter}
-                          onSubitemTab={handleSubitemTab}
-                          onSubitemDragStart={startSubitemDrag}
-                          onArrowNavigate={handleArrowNavigation}
+                          onKeyDown={handleArrowNavigation}
                         />
-                      ))}
-                    </ul>
+                        <span className="kanban-col-count">{col.cards.length}</span>
+                        <button
+                          className="kanban-col-delete"
+                          title="컬럼 삭제"
+                          onClick={() => deleteColumn(row.id, col.id)}
+                        >
+                          ×
+                        </button>
+                      </header>
 
-                    <button
-                      className="kanban-add-card"
-                      onClick={() => addCard(row.id, col.id)}
-                    >
-                      + 카드 추가
-                    </button>
-                  </section>
-                );
-              })}
+                      {col.note && <p className="kanban-col-note">{col.note}</p>}
 
-              <button className="kanban-add-column" onClick={() => addColumn(row.id)}>
-                + 컬럼
-              </button>
-            </div>
-          </section>
-        ))}
+                      <ul
+                        className={`kanban-cards${
+                          isDropCol &&
+                          dropTarget?.kind === "card" &&
+                          dropTarget.beforeCardId === null
+                            ? " drop-end"
+                            : ""
+                        }`}
+                      >
+                        {col.cards.map((card) => (
+                          <KanbanCardItem
+                            key={card.id}
+                            card={card}
+                            isDragging={draggingId === card.id}
+                            isDropBefore={
+                              isDropCol &&
+                              dropTarget?.kind === "card" &&
+                              dropTarget.beforeCardId === card.id
+                            }
+                            isSubitemDrop={
+                              isDropCol &&
+                              dropTarget?.kind === "subitem" &&
+                              dropTarget.cardId === card.id &&
+                              dropTarget.parentSubitemId === null &&
+                              dropTarget.beforeSubitemId === null
+                            }
+                            focusRequest={focusRequest}
+                            onFocusHandled={() => setFocusRequest(null)}
+                            onToggle={() => toggleCard(row.id, col.id, card.id)}
+                            onTextChange={(t) =>
+                              setCardText(row.id, col.id, card.id, t)
+                            }
+                            onDelete={() => deleteCard(row.id, col.id, card.id)}
+                            onEnter={() => addCard(row.id, col.id, card.id)}
+                            onTab={() => handleCardTab(card.id)}
+                            onDragStart={() =>
+                              startCardDrag(card.id, row.id, col.id)
+                            }
+                            onDragMove={moveDrag}
+                            onDragEnd={endDrag}
+                            draggingId={draggingId}
+                            dropTarget={dropTarget}
+                            onSubitemToggle={toggleSubitem}
+                            onSubitemTextChange={setSubitemText}
+                            onSubitemDelete={deleteSubitem}
+                            onSubitemEnter={handleSubitemEnter}
+                            onSubitemTab={handleSubitemTab}
+                            onSubitemDragStart={startSubitemDrag}
+                            onArrowNavigate={handleArrowNavigation}
+                          />
+                        ))}
+                      </ul>
+
+                      <button
+                        className="kanban-add-card"
+                        onClick={() => addCard(row.id, col.id)}
+                      >
+                        + 카드 추가
+                      </button>
+                    </section>
+                  );
+                })}
+
+                <button
+                  className={`kanban-add-column${
+                    isColumnDropEnd ? " column-drop-before" : ""
+                  }`}
+                  onClick={() => addColumn(row.id)}
+                >
+                  + 컬럼
+                </button>
+              </div>
+            </section>
+          );
+        })}
 
         <button className="kanban-add-row" onClick={addRow}>
           + Row

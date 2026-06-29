@@ -40,6 +40,11 @@ export interface CardDropTarget {
   beforeCardId: string | null;
 }
 
+export interface ColumnDropTarget {
+  rowId: string;
+  beforeColId: string | null;
+}
+
 export type FocusRequest =
   | { kind: "card"; id: string }
   | { kind: "subitem"; id: string }
@@ -47,10 +52,12 @@ export type FocusRequest =
 
 export type DragSource =
   | { kind: "card"; cardId: string; fromRowId: string; fromColId: string }
+  | { kind: "column"; colId: string; fromRowId: string }
   | { kind: "subitem"; subitemId: string };
 
 export type DropTarget =
   | ({ kind: "card" } & CardDropTarget)
+  | ({ kind: "column" } & ColumnDropTarget)
   | {
       kind: "subitem";
       rowId: string;

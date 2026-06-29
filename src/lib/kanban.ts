@@ -1,5 +1,6 @@
 export type {
   CardDropTarget,
+  ColumnDropTarget,
   DragSource,
   DropTarget,
   FocusRequest,
@@ -33,6 +34,7 @@ export {
   insertCardAfter,
   insertSubitem,
   isInvalidDropTarget,
+  moveColumn,
   outdentSubitem,
   removeCard,
   removeSubitem,

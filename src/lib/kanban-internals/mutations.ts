@@ -4,6 +4,7 @@ import type {
   FocusRequest,
   KanbanBoard as Board,
   KanbanCard,
+  KanbanColumn,
   KanbanSubitem,
   SubitemLocation,
 } from "./model";
@@ -222,6 +223,11 @@ function isSelfOrDescendant(board: Board, sourceSubitemId: string, targetParentS
 }
 
 export function isInvalidDropTarget(board: Board, source: DragSource, target: DropTarget): boolean {
+  if (source.kind === "column") {
+    return target.kind !== "column" || source.colId === target.beforeColId;
+  }
+  if (target.kind === "column") return true;
+
   if (source.kind === "card" && target.kind === "subitem") {
     return source.cardId === target.cardId;
   }
@@ -242,6 +248,55 @@ export function findCard(board: Board, cardId: string): KanbanCard | null {
     }
   }
   return null;
+}
+
+export function moveColumn(
+  board: Board,
+  colId: string,
+  fromRowId: string,
+  target: Extract<DropTarget, { kind: "column" }>,
+): Board {
+  const fromRow = board.rows.find((row) => row.id === fromRowId);
+  const sourceIndex = fromRow?.columns.findIndex((col) => col.id === colId) ?? -1;
+  if (!fromRow || sourceIndex < 0) return board;
+
+  const nextSourceColId = fromRow.columns[sourceIndex + 1]?.id ?? null;
+  if (
+    fromRowId === target.rowId &&
+    (target.beforeColId === colId || target.beforeColId === nextSourceColId)
+  ) {
+    return board;
+  }
+
+  let moved: KanbanColumn | null = null;
+  const strippedRows = board.rows.map((row) => {
+    if (row.id !== fromRowId) return row;
+    return {
+      ...row,
+      columns: row.columns.filter((col) => {
+        if (col.id !== colId) return true;
+        moved = col;
+        return false;
+      }),
+    };
+  });
+
+  if (!moved) return board;
+
+  let inserted = false;
+  const rows = strippedRows.map((row) => {
+    if (row.id !== target.rowId) return row;
+    const columns = [...row.columns];
+    const idx =
+      target.beforeColId === null
+        ? columns.length
+        : columns.findIndex((col) => col.id === target.beforeColId);
+    columns.splice(idx === -1 ? columns.length : idx, 0, moved!);
+    inserted = true;
+    return { ...row, columns };
+  });
+
+  return inserted ? { ...board, rows } : board;
 }
 
 export function removeCard(board: Board, cardId: string): { board: Board; card: KanbanCard | null } {
@@ -406,6 +461,10 @@ function newSubitem(text = ""): KanbanSubitem {
 
 export function applyDrop(board: Board, source: DragSource, target: DropTarget): Board {
   if (isInvalidDropTarget(board, source, target)) return board;
+
+  if (source.kind === "column" && target.kind === "column") {
+    return moveColumn(board, source.colId, source.fromRowId, target);
+  }
 
   if (source.kind === "card" && target.kind === "card") {
     return moveCardInBoard(

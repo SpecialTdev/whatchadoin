@@ -26,6 +26,11 @@ export function useKanbanDrag(
     setDraggingId(cardId);
   }
 
+  function startColumnDrag(colId: string, fromRowId: string) {
+    draggedRef.current = { kind: "column", colId, fromRowId };
+    setDraggingId(colId);
+  }
+
   function startSubitemDrag(subitemId: string) {
     draggedRef.current = { kind: "subitem", subitemId };
     setDraggingId(subitemId);
@@ -52,14 +57,48 @@ export function useKanbanDrag(
     return { kind: "card", rowId, colId, beforeCardId: next ? next.id : null };
   }
 
+  function computeColumnTarget(
+    rowId: string,
+    colId: string | null,
+    x: number,
+  ): Extract<DropTarget, { kind: "column" }> {
+    const row = findRow(rowId);
+    if (!colId) {
+      const firstCol = row?.columns[0];
+      const firstColId = firstCol?.id;
+      const firstColEl = firstCol
+        ? (document.querySelector(`[data-col-id="${firstCol.id}"]`) as HTMLElement | null)
+        : null;
+      const firstRect = firstColEl?.getBoundingClientRect();
+      if (firstColId && firstRect && x <= firstRect.left + firstRect.width / 2) {
+        return { kind: "column", rowId, beforeColId: firstColId };
+      }
+      return { kind: "column", rowId, beforeColId: null };
+    }
+
+    const colEl = document.querySelector(`[data-col-id="${colId}"]`) as HTMLElement | null;
+    const rect = colEl?.getBoundingClientRect();
+    if (rect && x <= rect.left + rect.width / 2) {
+      return { kind: "column", rowId, beforeColId: colId };
+    }
+
+    const idx = row ? row.columns.findIndex((col) => col.id === colId) : -1;
+    const next = row && idx >= 0 ? row.columns[idx + 1] : undefined;
+    return { kind: "column", rowId, beforeColId: next ? next.id : null };
+  }
+
   function computeDropTarget(x: number, y: number): DropTarget | null {
+    const dragged = draggedRef.current;
     const el = document.elementFromPoint(x, y) as HTMLElement | null;
     const rowEl = el?.closest("[data-row-id]") as HTMLElement | null;
     const colEl = el?.closest("[data-col-id]") as HTMLElement | null;
-    if (!rowEl || !colEl) return null;
+    if (!rowEl) return null;
 
     const rowId = rowEl.getAttribute("data-row-id")!;
-    const colId = colEl.getAttribute("data-col-id")!;
+    const colId = colEl?.getAttribute("data-col-id") ?? null;
+    if (dragged?.kind === "column") return computeColumnTarget(rowId, colId, x);
+    if (!colId) return null;
+
     const subitemEl = el?.closest("[data-subitem-id]") as HTMLElement | null;
     const cardEl = el?.closest("[data-card-id]") as HTMLElement | null;
 
@@ -127,6 +166,9 @@ export function useKanbanDrag(
 
   const draggingText = draggingId
     ? findCard(board, draggingId)?.text ??
+      board.rows
+        .flatMap((row) => row.columns)
+        .find((col) => col.id === draggingId)?.title ??
       findSubitemLocation(board, draggingId)?.item.text ??
       null
     : null;
@@ -139,6 +181,7 @@ export function useKanbanDrag(
     ghostPos,
     moveDrag,
     startCardDrag,
+    startColumnDrag,
     startSubitemDrag,
   };
 }

@@ -84,6 +84,49 @@ describe("kanban markdown domain", () => {
       "Alpha",
     ]);
   });
+
+  it("applies column drops within a row", () => {
+    const board = parseMarkdown(SAMPLE);
+    const progress = board.rows[0].columns[0];
+
+    const next = applyDrop(
+      board,
+      { kind: "column", colId: progress.id, fromRowId: board.rows[0].id },
+      { kind: "column", rowId: board.rows[0].id, beforeColId: null },
+    );
+
+    expect(next.rows[0].columns.map((col) => col.title)).toEqual([
+      "완료",
+      "진행 중",
+    ]);
+  });
+
+  it("applies column drops across rows", () => {
+    const board = parseMarkdown(`${SAMPLE}
+# 나중에
+
+## Backlog
+- [ ] Later
+`);
+    const progress = board.rows[0].columns[0];
+    const backlog = board.rows[1].columns[0];
+
+    const next = applyDrop(
+      board,
+      { kind: "column", colId: progress.id, fromRowId: board.rows[0].id },
+      {
+        kind: "column",
+        rowId: board.rows[1].id,
+        beforeColId: backlog.id,
+      },
+    );
+
+    expect(next.rows[0].columns.map((col) => col.title)).toEqual(["완료"]);
+    expect(next.rows[1].columns.map((col) => col.title)).toEqual([
+      "진행 중",
+      "Backlog",
+    ]);
+  });
 });
 
 describe("kanban keyboard navigation helpers", () => {
