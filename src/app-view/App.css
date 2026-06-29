@@ -1574,8 +1574,8 @@ body.right-sidebar-resizing * {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  flex: 0 0 auto;
-  max-height: 8.5rem;
+  flex: 1 1 8.5rem;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 0.15rem;
 }
