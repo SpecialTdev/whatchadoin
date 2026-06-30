@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import type { CheckInTaskOption } from "../lib/checkin";
 import KanbanBoard from "./KanbanBoard";
 
 type Focus = "note" | "kanban";
@@ -12,6 +13,7 @@ interface Props {
   onNoteChange: (note: string) => void;
   onNoteDraftChange?: (note: string) => void;
   tasks: string[];
+  taskOptions?: CheckInTaskOption[];
   activeTask: string | null;
   onTaskCheckIn?: (task: string) => Promise<void>;
   /** 값이 바뀌면(체크인 '직접 입력' 등) Note 패널을 활성화하고 포커스한다 */
@@ -24,6 +26,7 @@ function WorkView({
   onNoteChange,
   onNoteDraftChange,
   tasks,
+  taskOptions = tasks.map((task) => ({ kind: "parent", label: task, value: task })),
   activeTask,
   onTaskCheckIn,
   focusSignal,
@@ -32,6 +35,7 @@ function WorkView({
   const [focus, setFocus] = useState<Focus>("note");
   const [draftNote, setDraftNote] = useState(note);
   const [pendingTask, setPendingTask] = useState<string | null>(null);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const draftNoteRef = useRef(note);
@@ -96,6 +100,16 @@ function WorkView({
     }
   }
 
+  async function handleParentTaskClick(task: string, hasSubtasks: boolean) {
+    setExpandedTask(hasSubtasks ? task : null);
+    await handleTaskClick(task);
+  }
+
+  async function handleSubtaskClick(task: string, parentTask: string) {
+    setExpandedTask(parentTask);
+    await handleTaskClick(task);
+  }
+
   useEffect(() => {
     if (note === lastFlushedNoteRef.current) return;
     clearFlushTimer();
@@ -103,6 +117,14 @@ function WorkView({
     draftNoteRef.current = note;
     setDraftNote(note);
   }, [clearFlushTimer, note]);
+
+  useEffect(() => {
+    if (!activeTask) return;
+    const activeOption = taskOptions.find((option) => option.value === activeTask);
+    if (activeOption?.kind === "subitem" && activeOption.parentValue) {
+      setExpandedTask(activeOption.parentValue);
+    }
+  }, [activeTask, taskOptions]);
 
   useEffect(() => {
     return () => {
@@ -148,24 +170,57 @@ function WorkView({
 
       {tasks.length > 0 && (
         <div className="task-bar">
-          {tasks.map((task) => (
-            <button
-              key={task}
-              className={[
-                "task-chip",
-                task === activeTask ? "active" : "",
-                pendingTask === task ? "pending" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              type="button"
-              disabled={pendingTask === task}
-              onClick={() => handleTaskClick(task)}
-              aria-pressed={task === activeTask}
-            >
-              {task}
-            </button>
-          ))}
+          {tasks.map((task) => {
+            const subtasks = taskOptions.filter(
+              (option) => option.kind === "subitem" && option.parentValue === task,
+            );
+            const isExpanded = expandedTask === task;
+            return (
+              <span className="task-chip-group" key={task}>
+                <button
+                  className={[
+                    "task-chip",
+                    task === activeTask ? "active" : "",
+                    pendingTask === task ? "pending" : "",
+                    subtasks.length > 0 ? "has-subtasks" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  type="button"
+                  disabled={pendingTask === task}
+                  onClick={() => handleParentTaskClick(task, subtasks.length > 0)}
+                  aria-pressed={task === activeTask}
+                  aria-expanded={subtasks.length > 0 ? isExpanded : undefined}
+                >
+                  <span>{task}</span>
+                  {subtasks.length > 0 && (
+                    <span className="task-chip-count">{subtasks.length}</span>
+                  )}
+                </button>
+                {isExpanded &&
+                  subtasks.map((subtask) => (
+                    <button
+                      key={subtask.value}
+                      className={[
+                        "task-chip",
+                        "subtask",
+                        subtask.value === activeTask ? "active" : "",
+                        pendingTask === subtask.value ? "pending" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      type="button"
+                      disabled={pendingTask === subtask.value}
+                      onClick={() => handleSubtaskClick(subtask.value, task)}
+                      aria-pressed={subtask.value === activeTask}
+                      title={subtask.value}
+                    >
+                      {subtask.label}
+                    </button>
+                  ))}
+              </span>
+            );
+          })}
         </div>
       )}
 

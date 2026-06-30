@@ -48,6 +48,7 @@ function collectSubitemOptions(
       pushTaskOption(out, seen, {
         kind: "subitem",
         label,
+        parentValue: parentPath[0],
         value: path.join(TASK_PATH_SEPARATOR),
       });
       collectSubitemOptions(item.children, path, out, seen);

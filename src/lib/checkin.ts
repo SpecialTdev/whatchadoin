@@ -11,6 +11,7 @@ export interface CheckInTaskOption {
   kind: CheckInTaskKind;
   label: string;
   value: string;
+  parentValue?: string;
 }
 
 export interface CheckInSubmitEvent {

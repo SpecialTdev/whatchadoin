@@ -54,22 +54,30 @@ describe("kanban markdown domain", () => {
     expect(extractOpenTasks(note)).toEqual(["Alpha", "Beta", "Gamma"]);
     expect(extractOpenTaskOptions(note)).toEqual([
       { kind: "parent", label: "Alpha", value: "Alpha" },
-      { kind: "subitem", label: "Alpha child", value: "Alpha › Alpha child" },
+      {
+        kind: "subitem",
+        label: "Alpha child",
+        parentValue: "Alpha",
+        value: "Alpha › Alpha child",
+      },
       { kind: "parent", label: "Beta", value: "Beta" },
       {
         kind: "subitem",
         label: "Duplicate child",
+        parentValue: "Alpha",
         value: "Alpha › Duplicate child",
       },
       { kind: "parent", label: "Gamma", value: "Gamma" },
       {
         kind: "subitem",
         label: "Duplicate child",
+        parentValue: "Gamma",
         value: "Gamma › Duplicate child",
       },
       {
         kind: "subitem",
         label: "Deep child",
+        parentValue: "Gamma",
         value: "Gamma › Duplicate child › Deep child",
       },
     ]);
@@ -88,7 +96,12 @@ describe("kanban markdown domain", () => {
 
     expect(extractOpenTaskOptions(note)).toEqual([
       { kind: "parent", label: "Visible", value: "Visible" },
-      { kind: "subitem", label: "Open child", value: "Visible › Open child" },
+      {
+        kind: "subitem",
+        label: "Open child",
+        parentValue: "Visible",
+        value: "Visible › Open child",
+      },
     ]);
   });
 

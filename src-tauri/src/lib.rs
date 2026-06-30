@@ -63,6 +63,8 @@ struct CheckInTaskOption {
     kind: CheckInTaskKind,
     label: String,
     value: String,
+    #[serde(default, rename = "parentValue")]
+    parent_value: Option<String>,
 }
 
 impl<'de> serde::Deserialize<'de> for CheckInTaskKind {
@@ -86,6 +88,7 @@ fn parent_task_options(tasks: &[String]) -> Vec<CheckInTaskOption> {
             kind: CheckInTaskKind::Parent,
             label: task.clone(),
             value: task.clone(),
+            parent_value: None,
         })
         .collect()
 }
@@ -463,6 +466,7 @@ fn submit_checkin(
                 kind: CheckInTaskKind::Parent,
                 label: task.clone(),
                 value: task.clone(),
+                parent_value: None,
             });
         }
         if s.mode == CheckInMode::Working {

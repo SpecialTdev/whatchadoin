@@ -1135,7 +1135,16 @@ body.right-sidebar-resizing * {
   margin-bottom: 0.75rem;
 }
 
+.task-chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .task-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   appearance: none;
   padding: 0.25rem 0.65rem;
   border: 1px solid var(--border);
@@ -1173,6 +1182,24 @@ body.right-sidebar-resizing * {
 .task-chip:disabled {
   cursor: wait;
   opacity: 0.65;
+}
+
+.task-chip.subtask {
+  padding-left: 0.5rem;
+  border-style: dashed;
+  font-size: 0.76rem;
+}
+
+.task-chip-count {
+  flex: 0 0 auto;
+  min-width: 1rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-align: center;
 }
 
 .markdown-editor {
@@ -1603,7 +1630,14 @@ body.right-sidebar-resizing * {
   padding-right: 0.15rem;
 }
 
+.checkin-task-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .checkin-task-btn {
+  flex: 1 1 100%;
   width: 100%;
   text-align: left;
   padding: 0.55rem 0.75rem;
@@ -1616,11 +1650,33 @@ body.right-sidebar-resizing * {
   transition: background 0.12s, border-color 0.12s;
 }
 
+.checkin-task-btn.has-subtasks {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .checkin-task-btn.subtask {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 0.45rem;
   padding-left: 0.65rem;
+}
+
+.checkin-subtask-count {
+  flex: 0 0 auto;
+  min-width: 1.15rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-align: center;
 }
 
 .checkin-task-btn:hover {

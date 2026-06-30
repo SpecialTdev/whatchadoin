@@ -713,6 +713,7 @@ function App() {
             onNoteChange={setNote}
             onNoteDraftChange={handleNoteDraftChange}
             tasks={tasks}
+            taskOptions={taskOptions}
             activeTask={activeTask}
             onTaskCheckIn={handleTaskChipCheckIn}
             focusSignal={noteFocusNonce}

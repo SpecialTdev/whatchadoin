@@ -26,7 +26,7 @@ function CheckInWindow() {
   const [memoByTask, setMemoByTask] = useState<Record<string, string>>({});
   const [memoDirty, setMemoDirty] = useState(false);
   const [showNewTaskInput, setShowNewTaskInput] = useState(false);
-  const [showSubtasks, setShowSubtasks] = useState(false);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [memoCollapsed, setMemoCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(MEMO_COLLAPSED_STORAGE_KEY) === "true";
@@ -45,6 +45,16 @@ function CheckInWindow() {
   function selectExistingTask(task: string) {
     setSelected(task);
     fillMemoForTask(task);
+  }
+
+  function selectParentTask(task: string, hasSubtasks: boolean) {
+    selectExistingTask(task);
+    setExpandedTask(hasSubtasks ? task : null);
+  }
+
+  function selectSubtask(task: string, parentTask: string) {
+    selectExistingTask(task);
+    setExpandedTask(parentTask);
   }
 
   function getTaskOptions(d: CheckInData): CheckInTaskOption[] {
@@ -119,7 +129,7 @@ function CheckInWindow() {
         setMemo(task ? memos[task] ?? "" : "");
         setMemoDirty(false);
         setShowNewTaskInput(d.active_task === null);
-        setShowSubtasks(selectedOption?.kind === "subitem");
+        setExpandedTask(selectedOption?.kind === "subitem" ? selectedOption.parentValue ?? null : null);
       } catch (e) {
         console.error("[CheckInWindow] get_checkin_data error:", e);
       }
@@ -147,14 +157,14 @@ function CheckInWindow() {
               : prev,
           );
           setSelected((prev) => event.payload.active_task ?? prev);
-          setShowSubtasks((prev) => {
-            if (!event.payload.active_task) return prev;
-            return (
-              taskOptionsRef.current.find(
-                (option) => option.value === event.payload.active_task,
-              )?.kind === "subitem" || prev
-            );
-          });
+          const option = event.payload.active_task
+            ? taskOptionsRef.current.find(
+                (item) => item.value === event.payload.active_task,
+              )
+            : null;
+          if (option?.kind === "subitem") {
+            setExpandedTask(option.parentValue ?? null);
+          }
         });
         if (cancelled) {
           refreshUnlisten();
@@ -315,6 +325,13 @@ function CheckInWindow() {
   const taskOptions = getTaskOptions(data);
   const parentTaskOptions = taskOptions.filter((option) => option.kind === "parent");
   const subtaskOptions = taskOptions.filter((option) => option.kind === "subitem");
+  const subtasksByParent = new Map<string, CheckInTaskOption[]>();
+  for (const option of subtaskOptions) {
+    if (!option.parentValue) continue;
+    const options = subtasksByParent.get(option.parentValue) ?? [];
+    options.push(option);
+    subtasksByParent.set(option.parentValue, options);
+  }
   const memoSnippet = memo.trim().replace(/\s+/g, " ");
   const memoSummary = memoSnippet
     ? memoSnippet.length > 36
@@ -331,42 +348,40 @@ function CheckInWindow() {
 
       {!showNewTaskInput ? (
         <div className="checkin-task-list">
-          {parentTaskOptions.map((option) => (
-            <button
-              key={option.value}
-              className={`checkin-task-btn${selected === option.value ? " selected" : ""}`}
-              onClick={() => selectExistingTask(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-          {subtaskOptions.length > 0 && (
-            <>
-              <button
-                className="checkin-subtask-toggle"
-                type="button"
-                onClick={() => setShowSubtasks((prev) => !prev)}
-                aria-expanded={showSubtasks}
-              >
-                <span>하위 작업</span>
-                <span>{showSubtasks ? "접기" : `${subtaskOptions.length}개 보기`}</span>
-              </button>
-              {showSubtasks &&
-                subtaskOptions.map((option) => (
+          {parentTaskOptions.map((option) => {
+            const childOptions = subtasksByParent.get(option.value) ?? [];
+            const isExpanded = expandedTask === option.value;
+            return (
+              <div className="checkin-task-group" key={option.value}>
+                <button
+                  className={`checkin-task-btn${
+                    selected === option.value ? " selected" : ""
+                  }${childOptions.length > 0 ? " has-subtasks" : ""}`}
+                  onClick={() => selectParentTask(option.value, childOptions.length > 0)}
+                  aria-expanded={childOptions.length > 0 ? isExpanded : undefined}
+                >
+                  <span>{option.label}</span>
+                  {childOptions.length > 0 && (
+                    <span className="checkin-subtask-count">{childOptions.length}</span>
+                  )}
+                </button>
+                {isExpanded &&
+                  childOptions.map((child) => (
                   <button
-                    key={option.value}
+                    key={child.value}
                     className={`checkin-task-btn subtask${
-                      selected === option.value ? " selected" : ""
+                      selected === child.value ? " selected" : ""
                     }`}
-                    onClick={() => selectExistingTask(option.value)}
-                    title={option.value}
+                    onClick={() => selectSubtask(child.value, option.value)}
+                    title={child.value}
                   >
                     <span className="checkin-task-kind">하위</span>
-                    <span className="checkin-task-label">{option.label}</span>
+                    <span className="checkin-task-label">{child.label}</span>
                   </button>
                 ))}
-            </>
-          )}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <input
