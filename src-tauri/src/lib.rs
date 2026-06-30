@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -154,6 +155,13 @@ fn note_path(app: &AppHandle) -> Option<PathBuf> {
     let dir = app.path().app_data_dir().ok()?;
     std::fs::create_dir_all(&dir).ok();
     Some(dir.join("workspace-note.md"))
+}
+
+// Report 하단의 날짜별 개인 note를 저장하는 JSON 파일.
+fn report_notes_path(app: &AppHandle) -> Option<PathBuf> {
+    let dir = app.path().app_data_dir().ok()?;
+    std::fs::create_dir_all(&dir).ok();
+    Some(dir.join("report-notes.json"))
 }
 
 // collector가 들고 있는 최신 note 스냅샷을 workspace-note.md에 저장한다.
@@ -579,6 +587,27 @@ fn get_note(app: AppHandle) -> Option<String> {
     note_path(&app).and_then(|p| std::fs::read_to_string(&p).ok())
 }
 
+fn read_report_notes(app: &AppHandle) -> HashMap<String, String> {
+    report_notes_path(app)
+        .and_then(|p| std::fs::read(&p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn get_report_note(app: AppHandle, date: String) -> String {
+    read_report_notes(&app).remove(&date).unwrap_or_default()
+}
+
+#[tauri::command]
+fn save_report_note(app: AppHandle, date: String, note: String) -> Result<(), String> {
+    let path = report_notes_path(&app).ok_or("app data dir 확보 실패")?;
+    let mut notes = read_report_notes(&app);
+    notes.insert(date, note);
+    let json = serde_json::to_string_pretty(&notes).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
 // 프런트(위젯 등)가 요청하는 시스템 알림을 띄운다 (타이머 완료 알람 등).
 #[tauri::command]
 fn notify(app: AppHandle, title: String, body: String) {
@@ -779,6 +808,8 @@ pub fn run() {
             get_widgets,
             save_widgets,
             get_note,
+            get_report_note,
+            save_report_note,
             notify
         ])
         .build(tauri::generate_context!())
