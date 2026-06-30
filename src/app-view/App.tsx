@@ -21,6 +21,7 @@ import {
   workDayKey,
   type TrackedEvent,
 } from "../lib/events";
+import { latestMemoByTask } from "../lib/checkinMemo";
 import type {
   CheckInMode,
   CheckInStatus,
@@ -249,6 +250,7 @@ function App() {
   const tasksRef = useRef(tasks);
   const taskOptionsRef = useRef(taskOptions);
   const activeTaskRef = useRef(activeTask);
+  const checkInModeRef = useRef(checkInMode);
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
@@ -258,6 +260,9 @@ function App() {
   useEffect(() => {
     activeTaskRef.current = activeTask;
   }, [activeTask]);
+  useEffect(() => {
+    checkInModeRef.current = checkInMode;
+  }, [checkInMode]);
 
   const applyCheckInStatus = useCallback((status: CheckInStatus) => {
     setCheckInMode(status.mode);
@@ -516,6 +521,24 @@ function App() {
     }
   }, []);
 
+  const handleTaskChipCheckIn = useCallback(async (task: string) => {
+    try {
+      const { invoke } = await coreApi();
+      const events = await fetchEvents();
+      const memo = latestMemoByTask(events)[task] ?? "";
+
+      if (checkInModeRef.current !== "working") {
+        const status = await invoke<CheckInStatus>("clock_in");
+        applyCheckInStatus(status);
+      }
+
+      await invoke("submit_checkin", { task, memo });
+    } catch (e) {
+      console.error("[App] task chip check-in failed:", e);
+      throw e;
+    }
+  }, [applyCheckInStatus]);
+
   const runCheckInStatusCommand = useCallback(
     async (command: "clock_in" | "clock_out" | "end_break") => {
       try {
@@ -691,6 +714,7 @@ function App() {
             onNoteDraftChange={handleNoteDraftChange}
             tasks={tasks}
             activeTask={activeTask}
+            onTaskCheckIn={handleTaskChipCheckIn}
             focusSignal={noteFocusNonce}
             footerAction={workSessionControls}
           />

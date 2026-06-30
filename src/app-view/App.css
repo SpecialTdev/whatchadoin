@@ -1136,6 +1136,7 @@ body.right-sidebar-resizing * {
 }
 
 .task-chip {
+  appearance: none;
   padding: 0.25rem 0.65rem;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -1143,6 +1144,17 @@ body.right-sidebar-resizing * {
   color: var(--text-muted);
   background: var(--surface);
   white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.task-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .task-chip.active {
@@ -1150,6 +1162,17 @@ body.right-sidebar-resizing * {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
+}
+
+.task-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.task-chip.pending,
+.task-chip:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .markdown-editor {

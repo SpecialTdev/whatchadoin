@@ -13,6 +13,7 @@ interface Props {
   onNoteDraftChange?: (note: string) => void;
   tasks: string[];
   activeTask: string | null;
+  onTaskCheckIn?: (task: string) => Promise<void>;
   /** 값이 바뀌면(체크인 '직접 입력' 등) Note 패널을 활성화하고 포커스한다 */
   focusSignal?: number;
   footerAction?: ReactNode;
@@ -24,11 +25,13 @@ function WorkView({
   onNoteDraftChange,
   tasks,
   activeTask,
+  onTaskCheckIn,
   focusSignal,
   footerAction,
 }: Props) {
   const [focus, setFocus] = useState<Focus>("note");
   const [draftNote, setDraftNote] = useState(note);
+  const [pendingTask, setPendingTask] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const draftNoteRef = useRef(note);
@@ -81,6 +84,16 @@ function WorkView({
     setDraftNote(value);
     onNoteDraftChange?.(value);
     scheduleFlush(value);
+  }
+
+  async function handleTaskClick(task: string) {
+    if (!onTaskCheckIn || pendingTask === task) return;
+    setPendingTask(task);
+    try {
+      await onTaskCheckIn(task);
+    } finally {
+      setPendingTask(null);
+    }
   }
 
   useEffect(() => {
@@ -136,12 +149,22 @@ function WorkView({
       {tasks.length > 0 && (
         <div className="task-bar">
           {tasks.map((task) => (
-            <span
+            <button
               key={task}
-              className={`task-chip${task === activeTask ? " active" : ""}`}
+              className={[
+                "task-chip",
+                task === activeTask ? "active" : "",
+                pendingTask === task ? "pending" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              type="button"
+              disabled={pendingTask === task}
+              onClick={() => handleTaskClick(task)}
+              aria-pressed={task === activeTask}
             >
               {task}
-            </span>
+            </button>
           ))}
         </div>
       )}
