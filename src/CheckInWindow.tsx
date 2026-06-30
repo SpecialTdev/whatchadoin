@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { CheckInStatus } from "./lib/checkin";
+import type { CheckInStatus, CheckInTaskOption } from "./lib/checkin";
 import { latestMemoByTask } from "./lib/checkinMemo";
 import { fetchEvents } from "./lib/events";
 import { renderMarkdown } from "./lib/markdown";
@@ -11,6 +11,7 @@ import "./CheckInWindow.css";
 
 interface CheckInData extends CheckInStatus {
   tasks: string[];
+  task_options?: CheckInTaskOption[];
 }
 
 const MEMO_COLLAPSED_STORAGE_KEY = "checkin:memo-collapsed";
@@ -25,6 +26,7 @@ function CheckInWindow() {
   const [memoByTask, setMemoByTask] = useState<Record<string, string>>({});
   const [memoDirty, setMemoDirty] = useState(false);
   const [showNewTaskInput, setShowNewTaskInput] = useState(false);
+  const [showSubtasks, setShowSubtasks] = useState(false);
   const [memoCollapsed, setMemoCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(MEMO_COLLAPSED_STORAGE_KEY) === "true";
@@ -33,6 +35,7 @@ function CheckInWindow() {
     }
   });
   const initialCollapsedResizeAppliedRef = useRef(false);
+  const taskOptionsRef = useRef<CheckInTaskOption[]>([]);
 
   function fillMemoForTask(task: string, memos = memoByTask) {
     setMemo(task ? memos[task] ?? "" : "");
@@ -42,6 +45,12 @@ function CheckInWindow() {
   function selectExistingTask(task: string) {
     setSelected(task);
     fillMemoForTask(task);
+  }
+
+  function getTaskOptions(d: CheckInData): CheckInTaskOption[] {
+    return d.task_options && d.task_options.length > 0
+      ? d.task_options
+      : d.tasks.map((task) => ({ kind: "parent", label: task, value: task }));
   }
 
   function handleNewTaskChange(value: string) {
@@ -100,6 +109,9 @@ function CheckInWindow() {
         if (cancelled) return;
         console.log("[CheckInWindow] get_checkin_data returned:", d);
         const task = d.active_task ?? d.tasks[0] ?? "";
+        const options = getTaskOptions(d);
+        const selectedOption = options.find((option) => option.value === task);
+        taskOptionsRef.current = options;
         setData(d);
         setMemoByTask(memos);
         setSelected(task);
@@ -107,6 +119,7 @@ function CheckInWindow() {
         setMemo(task ? memos[task] ?? "" : "");
         setMemoDirty(false);
         setShowNewTaskInput(d.active_task === null);
+        setShowSubtasks(selectedOption?.kind === "subitem");
       } catch (e) {
         console.error("[CheckInWindow] get_checkin_data error:", e);
       }
@@ -134,6 +147,14 @@ function CheckInWindow() {
               : prev,
           );
           setSelected((prev) => event.payload.active_task ?? prev);
+          setShowSubtasks((prev) => {
+            if (!event.payload.active_task) return prev;
+            return (
+              taskOptionsRef.current.find(
+                (option) => option.value === event.payload.active_task,
+              )?.kind === "subitem" || prev
+            );
+          });
         });
         if (cancelled) {
           refreshUnlisten();
@@ -291,6 +312,9 @@ function CheckInWindow() {
   }
 
   const submitDisabled = showNewTaskInput ? !newTask.trim() : !selected;
+  const taskOptions = getTaskOptions(data);
+  const parentTaskOptions = taskOptions.filter((option) => option.kind === "parent");
+  const subtaskOptions = taskOptions.filter((option) => option.kind === "subitem");
   const memoSnippet = memo.trim().replace(/\s+/g, " ");
   const memoSummary = memoSnippet
     ? memoSnippet.length > 36
@@ -307,15 +331,42 @@ function CheckInWindow() {
 
       {!showNewTaskInput ? (
         <div className="checkin-task-list">
-          {data.tasks.map((task) => (
+          {parentTaskOptions.map((option) => (
             <button
-              key={task}
-              className={`checkin-task-btn${selected === task ? " selected" : ""}`}
-              onClick={() => selectExistingTask(task)}
+              key={option.value}
+              className={`checkin-task-btn${selected === option.value ? " selected" : ""}`}
+              onClick={() => selectExistingTask(option.value)}
             >
-              {task}
+              {option.label}
             </button>
           ))}
+          {subtaskOptions.length > 0 && (
+            <>
+              <button
+                className="checkin-subtask-toggle"
+                type="button"
+                onClick={() => setShowSubtasks((prev) => !prev)}
+                aria-expanded={showSubtasks}
+              >
+                <span>하위 작업</span>
+                <span>{showSubtasks ? "접기" : `${subtaskOptions.length}개 보기`}</span>
+              </button>
+              {showSubtasks &&
+                subtaskOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    className={`checkin-task-btn subtask${
+                      selected === option.value ? " selected" : ""
+                    }`}
+                    onClick={() => selectExistingTask(option.value)}
+                    title={option.value}
+                  >
+                    <span className="checkin-task-kind">하위</span>
+                    <span className="checkin-task-label">{option.label}</span>
+                  </button>
+                ))}
+            </>
+          )}
         </div>
       ) : (
         <input

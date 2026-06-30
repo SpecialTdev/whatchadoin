@@ -42,4 +42,8 @@ export {
   updateSubitem,
 } from "./kanban-internals/mutations";
 
-export { appendTaskToProgress, extractOpenTasks } from "./kanban-internals/noteApi";
+export {
+  appendTaskToProgress,
+  extractOpenTaskOptions,
+  extractOpenTasks,
+} from "./kanban-internals/noteApi";

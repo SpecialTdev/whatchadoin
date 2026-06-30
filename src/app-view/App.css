@@ -1593,6 +1593,13 @@ body.right-sidebar-resizing * {
   transition: background 0.12s, border-color 0.12s;
 }
 
+.checkin-task-btn.subtask {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding-left: 0.65rem;
+}
+
 .checkin-task-btn:hover {
   border-color: var(--accent);
 }
@@ -1602,6 +1609,44 @@ body.right-sidebar-resizing * {
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
+}
+
+.checkin-task-kind {
+  flex: 0 0 auto;
+  padding: 0.08rem 0.32rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.checkin-task-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkin-subtask-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 0.35rem 0.1rem 0.1rem;
+  cursor: pointer;
+}
+
+.checkin-subtask-toggle:hover {
+  color: var(--accent);
 }
 
 .checkin-input {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendTaskToProgress,
   applyDrop,
+  extractOpenTaskOptions,
   extractOpenTasks,
   indentCard,
   outdentSubitem,
@@ -38,6 +39,57 @@ describe("kanban markdown domain", () => {
 `;
 
     expect(extractOpenTasks(note)).toEqual(["Alpha", "Beta", "Gamma"]);
+  });
+
+  it("extracts check-in subitem options without expanding the parent task list", () => {
+    const note = `${SAMPLE}
+## Backlog
+- [ ] Alpha
+  - [ ] Duplicate child
+- [ ] Gamma
+  - [ ] Duplicate child
+    - [ ] Deep child
+`;
+
+    expect(extractOpenTasks(note)).toEqual(["Alpha", "Beta", "Gamma"]);
+    expect(extractOpenTaskOptions(note)).toEqual([
+      { kind: "parent", label: "Alpha", value: "Alpha" },
+      { kind: "subitem", label: "Alpha child", value: "Alpha › Alpha child" },
+      { kind: "parent", label: "Beta", value: "Beta" },
+      {
+        kind: "subitem",
+        label: "Duplicate child",
+        value: "Alpha › Duplicate child",
+      },
+      { kind: "parent", label: "Gamma", value: "Gamma" },
+      {
+        kind: "subitem",
+        label: "Duplicate child",
+        value: "Gamma › Duplicate child",
+      },
+      {
+        kind: "subitem",
+        label: "Deep child",
+        value: "Gamma › Duplicate child › Deep child",
+      },
+    ]);
+  });
+
+  it("does not expose subitems under completed parents as check-in options", () => {
+    const note = `# Tasks
+
+## Done
+- [x] Parent
+  - [ ] Hidden child
+- [ ] Visible
+  - [x] Done child
+  - [ ] Open child
+`;
+
+    expect(extractOpenTaskOptions(note)).toEqual([
+      { kind: "parent", label: "Visible", value: "Visible" },
+      { kind: "subitem", label: "Open child", value: "Visible › Open child" },
+    ]);
   });
 
   it("appends new tasks to the progress column", () => {

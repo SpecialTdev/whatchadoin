@@ -31,6 +31,7 @@ enum CheckInMode {
 
 struct CheckInState {
     tasks: Vec<String>,
+    task_options: Vec<CheckInTaskOption>,
     active_task: Option<String>,
     interval_sec: u64,
     next_checkin_at: Instant,
@@ -41,6 +42,7 @@ impl Default for CheckInState {
     fn default() -> Self {
         Self {
             tasks: Vec::new(),
+            task_options: Vec::new(),
             active_task: None,
             interval_sec: DEFAULT_CHECKIN_INTERVAL_SEC,
             next_checkin_at: Instant::now() + Duration::from_secs(DEFAULT_CHECKIN_INTERVAL_SEC),
@@ -50,8 +52,48 @@ impl Default for CheckInState {
 }
 
 #[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "snake_case")]
+enum CheckInTaskKind {
+    Parent,
+    Subitem,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct CheckInTaskOption {
+    kind: CheckInTaskKind,
+    label: String,
+    value: String,
+}
+
+impl<'de> serde::Deserialize<'de> for CheckInTaskKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        match value.as_str() {
+            "parent" => Ok(Self::Parent),
+            "subitem" => Ok(Self::Subitem),
+            other => Err(serde::de::Error::unknown_variant(other, &["parent", "subitem"])),
+        }
+    }
+}
+
+fn parent_task_options(tasks: &[String]) -> Vec<CheckInTaskOption> {
+    tasks
+        .iter()
+        .map(|task| CheckInTaskOption {
+            kind: CheckInTaskKind::Parent,
+            label: task.clone(),
+            value: task.clone(),
+        })
+        .collect()
+}
+
+#[derive(serde::Serialize, Clone)]
 struct CheckInData {
     tasks: Vec<String>,
+    task_options: Vec<CheckInTaskOption>,
     active_task: Option<String>,
     mode: CheckInMode,
 }
@@ -285,6 +327,7 @@ fn emit_checkin_status(app: &AppHandle, status: CheckInStatus) {
 fn update_checkin_context(
     state: tauri::State<'_, Mutex<CheckInState>>,
     tasks: Vec<String>,
+    task_options: Option<Vec<CheckInTaskOption>>,
     active_task: Option<String>,
     interval_sec: u64,
 ) {
@@ -292,6 +335,7 @@ fn update_checkin_context(
     let mut s = state.lock().unwrap();
     let interval_changed = s.interval_sec != interval_sec;
 
+    s.task_options = task_options.unwrap_or_else(|| parent_task_options(&tasks));
     s.tasks = tasks;
     s.active_task = active_task;
     s.interval_sec = interval_sec;
@@ -306,6 +350,7 @@ fn open_checkin(
     app: AppHandle,
     state: tauri::State<'_, Mutex<CheckInState>>,
     tasks: Vec<String>,
+    task_options: Option<Vec<CheckInTaskOption>>,
     active_task: Option<String>,
 ) {
     println!(
@@ -314,6 +359,7 @@ fn open_checkin(
     );
     {
         let mut s = state.lock().unwrap();
+        s.task_options = task_options.unwrap_or_else(|| parent_task_options(&tasks));
         s.tasks = tasks;
         s.active_task = active_task;
     }
@@ -330,6 +376,7 @@ fn get_checkin_data(state: tauri::State<'_, Mutex<CheckInState>>) -> CheckInData
     );
     CheckInData {
         tasks: s.tasks.clone(),
+        task_options: s.task_options.clone(),
         active_task: s.active_task.clone(),
         mode: s.mode,
     }
@@ -410,6 +457,13 @@ fn submit_checkin(
         s.active_task = Some(task.clone());
         if !s.tasks.iter().any(|t| t == &task) {
             s.tasks.push(task.clone());
+        }
+        if !s.task_options.iter().any(|option| option.value == task) {
+            s.task_options.push(CheckInTaskOption {
+                kind: CheckInTaskKind::Parent,
+                label: task.clone(),
+                value: task.clone(),
+            });
         }
         if s.mode == CheckInMode::Working {
             s.next_checkin_at = Instant::now() + Duration::from_secs(s.interval_sec);

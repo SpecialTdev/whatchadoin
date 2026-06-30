@@ -11,6 +11,7 @@ import ReportView from "../components/ReportView";
 import SettingsView from "../components/SettingsView";
 import {
   appendTaskToProgress,
+  extractOpenTaskOptions,
   extractOpenTasks,
 } from "../lib/kanban";
 import { DEFAULT_NOTE, loadNote } from "../lib/note";
@@ -243,12 +244,17 @@ function App() {
   // 체크인 후보 = 노트의 실제 todo 항목
   const derivedTasks = useMemo(() => extractOpenTasks(note), [note]);
   const tasks = useStableStringArray(derivedTasks);
+  const taskOptions = useMemo(() => extractOpenTaskOptions(note), [note]);
 
   const tasksRef = useRef(tasks);
+  const taskOptionsRef = useRef(taskOptions);
   const activeTaskRef = useRef(activeTask);
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
+  useEffect(() => {
+    taskOptionsRef.current = taskOptions;
+  }, [taskOptions]);
   useEffect(() => {
     activeTaskRef.current = activeTask;
   }, [activeTask]);
@@ -393,19 +399,20 @@ function App() {
       .then(({ invoke }) =>
         invoke("update_checkin_context", {
           tasks,
+          taskOptions,
           activeTask,
           intervalSec,
         }),
       )
       .catch((e) => console.error("[App] update_checkin_context failed:", e));
-  }, [tasks, activeTask, intervalSec]);
+  }, [tasks, taskOptions, activeTask, intervalSec]);
 
   const handleCheckInSubmit = useCallback((task: string) => {
     setActiveTask(task);
     // 노트에 없던 새 작업이면 실제 todo로 편입
     setNote((prev) => {
       const latest = noteRef.current || prev;
-      const next = extractOpenTasks(latest).includes(task)
+      const next = extractOpenTaskOptions(latest).some((option) => option.value === task)
         ? latest
         : appendTaskToProgress(latest, task);
       noteRef.current = next;
@@ -500,6 +507,7 @@ function App() {
       console.log("[App] invoking open_checkin, tasks:", tasksRef.current, "activeTask:", activeTaskRef.current);
       await invoke("open_checkin", {
         tasks: tasksRef.current,
+        taskOptions: taskOptionsRef.current,
         activeTask: activeTaskRef.current,
       });
       console.log("[App] open_checkin returned");
