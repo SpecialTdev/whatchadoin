@@ -5331,7 +5331,7 @@ dependencies = [
 
 [[package]]
 name = "whatchadoin"
-version = "1.1.5"
+version = "1.1.6"
 dependencies = [
  "app-service",
  "collection",
