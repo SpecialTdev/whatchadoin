@@ -202,6 +202,17 @@ fn setup_main_window_close_handler(app: &AppHandle) {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn setup_windows_custom_titlebar(app: &AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        if let Err(e) = main.set_decorations(false) {
+            println!("[Rust] failed to disable Windows window decorations: {}", e);
+        }
+    } else {
+        println!("[Rust] main window missing, Windows titlebar setup skipped");
+    }
+}
+
 #[cfg(desktop)]
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app)
@@ -687,6 +698,8 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 setup_main_window_close_handler(app.handle());
+                #[cfg(target_os = "windows")]
+                setup_windows_custom_titlebar(app.handle());
                 if let Err(e) = build_tray(app.handle()) {
                     println!("[Rust] failed to build tray icon: {}", e);
                 }
