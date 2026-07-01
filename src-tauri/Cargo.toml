@@ -10,7 +10,7 @@ serde_json = "1"
 
 [package]
 name = "whatchadoin"
-version = "1.1.7"
+version = "1.1.8"
 description = "업무 밀도 트래커"
 authors = ["kunwo"]
 edition = "2021"
