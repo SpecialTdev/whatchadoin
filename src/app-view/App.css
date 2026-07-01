@@ -262,11 +262,19 @@ body,
   background: var(--surface);
 }
 
+.window-control.close span {
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+}
+
 .window-control.close span::before,
 .window-control.close span::after {
-  left: 17px;
-  top: 15px;
-  width: 13px;
+  left: 0;
+  top: 6px;
+  width: 14px;
   height: 1px;
   background: currentColor;
 }
