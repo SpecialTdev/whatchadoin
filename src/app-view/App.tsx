@@ -141,6 +141,14 @@ function readCssPixelValue(style: CSSStyleDeclaration, name: string): number {
   return Number.isFinite(value) ? value : 0;
 }
 
+function detectInitialPlatform(): string {
+  const platform = navigator.platform || navigator.userAgent;
+  if (/win/i.test(platform)) return "windows";
+  if (/mac/i.test(platform)) return "macos";
+  if (/linux/i.test(platform)) return "linux";
+  return "unknown";
+}
+
 function sameStringArray(a: string[], b: string[]): boolean {
   if (a === b) return true;
   if (a.length !== b.length) return false;
@@ -160,10 +168,10 @@ function useStableStringArray(values: string[]): string[] {
 
 function App() {
   const [tab, setTab] = useState<Tab>("work");
-  const [isMacos, setIsMacos] = useState<boolean>(() => {
-    const platform = navigator.platform || navigator.userAgent;
-    return /mac/i.test(platform);
-  });
+  const [platformOs, setPlatformOs] = useState<string>(() =>
+    detectInitialPlatform(),
+  );
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [leftSidebarVisible, setLeftSidebarVisible] = useState<boolean>(() =>
     loadStoredBoolean(LEFT_SIDEBAR_KEY, true),
   );
@@ -276,9 +284,38 @@ function App() {
   useEffect(() => {
     coreApi()
       .then(({ invoke }) => invoke<PlatformInfo>("get_platform_info"))
-      .then((info) => setIsMacos(info.os === "macos"))
+      .then((info) => setPlatformOs(info.os))
       .catch((e) => console.error("[App] get_platform_info failed:", e));
   }, []);
+
+  const isMacos = platformOs === "macos";
+  const isWindows = platformOs === "windows";
+  const hasAppTitlebar = isMacos || isWindows;
+
+  useEffect(() => {
+    if (!isWindows) {
+      setIsWindowMaximized(false);
+      return;
+    }
+
+    let cancelled = false;
+    async function syncWindowMaximized() {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const maximized = await getCurrentWindow().isMaximized();
+        if (!cancelled) setIsWindowMaximized(maximized);
+      } catch (e) {
+        console.error("[App] isMaximized failed:", e);
+      }
+    }
+
+    syncWindowMaximized();
+    window.addEventListener("resize", syncWindowMaximized);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("resize", syncWindowMaximized);
+    };
+  }, [isWindows]);
 
   useEffect(() => {
     storeBoolean(LEFT_SIDEBAR_KEY, leftSidebarVisible);
@@ -396,6 +433,35 @@ function App() {
     },
     [commitRightSidebarWidth, rightSidebarVisible],
   );
+
+  const handleWindowMinimize = useCallback(async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().minimize();
+    } catch (e) {
+      console.error("[App] minimize failed:", e);
+    }
+  }, []);
+
+  const handleWindowToggleMaximize = useCallback(async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      await win.toggleMaximize();
+      setIsWindowMaximized(await win.isMaximized());
+    } catch (e) {
+      console.error("[App] toggleMaximize failed:", e);
+    }
+  }, []);
+
+  const handleWindowClose = useCallback(async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().close();
+    } catch (e) {
+      console.error("[App] close failed:", e);
+    }
+  }, []);
 
   // 체크인 주기는 Rust 백그라운드 타이머가 관리한다. 메인 웹뷰가 닫혀도
   // 최신 후보/활성 작업/주기만 유지되면 checkin 창을 계속 띄울 수 있다.
@@ -648,6 +714,7 @@ function App() {
   const layoutClassName = [
     "layout",
     isMacos ? "macos-titlebar" : "",
+    isWindows ? "windows-titlebar" : "",
     leftSidebarVisible ? "" : "left-sidebar-collapsed",
     rightSidebarVisible ? "" : "right-sidebar-collapsed",
   ]
@@ -666,9 +733,28 @@ function App() {
         } as CSSProperties
       }
     >
-      {isMacos && (
-        <div className="native-titlebar-controls">
-          <div className="titlebar-drag-region" data-tauri-drag-region />
+      {hasAppTitlebar && (
+        <div
+          className={[
+            "native-titlebar-controls",
+            isMacos ? "macos" : "",
+            isWindows ? "windows" : "",
+            isWindowMaximized ? "is-window-maximized" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          <div
+            className="titlebar-drag-region"
+            data-tauri-drag-region
+            onDoubleClick={
+              isWindows
+                ? () => {
+                    void handleWindowToggleMaximize();
+                  }
+                : undefined
+            }
+          />
           <div className="native-titlebar-title">Whatchadoin</div>
           <button
             className="sidebar-toggle left"
@@ -694,6 +780,40 @@ function App() {
           >
             <span className="sidebar-toggle-icon" aria-hidden="true" />
           </button>
+          {isWindows && (
+            <div className="window-controls" aria-label="창 제어">
+              <button
+                className="window-control minimize"
+                type="button"
+                aria-label="창 최소화"
+                onClick={() => {
+                  void handleWindowMinimize();
+                }}
+              >
+                <span aria-hidden="true" />
+              </button>
+              <button
+                className="window-control maximize"
+                type="button"
+                aria-label={isWindowMaximized ? "창 복원" : "창 최대화"}
+                onClick={() => {
+                  void handleWindowToggleMaximize();
+                }}
+              >
+                <span aria-hidden="true" />
+              </button>
+              <button
+                className="window-control close"
+                type="button"
+                aria-label="창 닫기"
+                onClick={() => {
+                  void handleWindowClose();
+                }}
+              >
+                <span aria-hidden="true" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 
