@@ -1,12 +1,11 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import type { CheckInTaskOption } from "../lib/checkin";
 import KanbanBoard from "./KanbanBoard";
 
 type Focus = "note" | "kanban";
 
-const MIN_RATIO = 15;
-const MAX_RATIO = 85;
 const NOTE_FLUSH_DELAY_MS = 250;
-const clampRatio = (r: number) => Math.min(MAX_RATIO, Math.max(MIN_RATIO, r));
 
 interface Props {
   // note(markdown) = single source of truth (App이 소유). note/kanban 양쪽이 공유 편집한다.
@@ -14,9 +13,12 @@ interface Props {
   onNoteChange: (note: string) => void;
   onNoteDraftChange?: (note: string) => void;
   tasks: string[];
+  taskOptions?: CheckInTaskOption[];
   activeTask: string | null;
+  onTaskCheckIn?: (task: string) => Promise<void>;
   /** 값이 바뀌면(체크인 '직접 입력' 등) Note 패널을 활성화하고 포커스한다 */
   focusSignal?: number;
+  footerAction?: ReactNode;
 }
 
 function WorkView({
@@ -24,14 +26,17 @@ function WorkView({
   onNoteChange,
   onNoteDraftChange,
   tasks,
+  taskOptions = tasks.map((task) => ({ kind: "parent", label: task, value: task })),
   activeTask,
+  onTaskCheckIn,
   focusSignal,
+  footerAction,
 }: Props) {
   const [focus, setFocus] = useState<Focus>("note");
-  const [topRatio, setTopRatio] = useState(50); // Note 패널 높이 %
   const [draftNote, setDraftNote] = useState(note);
+  const [pendingTask, setPendingTask] = useState<string | null>(null);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
 
-  const splitRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const draftNoteRef = useRef(note);
   const lastFlushedNoteRef = useRef(note);
@@ -85,6 +90,26 @@ function WorkView({
     scheduleFlush(value);
   }
 
+  async function handleTaskClick(task: string) {
+    if (!onTaskCheckIn || pendingTask === task) return;
+    setPendingTask(task);
+    try {
+      await onTaskCheckIn(task);
+    } finally {
+      setPendingTask(null);
+    }
+  }
+
+  async function handleParentTaskClick(task: string, hasSubtasks: boolean) {
+    setExpandedTask(hasSubtasks ? task : null);
+    await handleTaskClick(task);
+  }
+
+  async function handleSubtaskClick(task: string, parentTask: string) {
+    setExpandedTask(parentTask);
+    await handleTaskClick(task);
+  }
+
   useEffect(() => {
     if (note === lastFlushedNoteRef.current) return;
     clearFlushTimer();
@@ -92,6 +117,14 @@ function WorkView({
     draftNoteRef.current = note;
     setDraftNote(note);
   }, [clearFlushTimer, note]);
+
+  useEffect(() => {
+    if (!activeTask) return;
+    const activeOption = taskOptions.find((option) => option.value === activeTask);
+    if (activeOption?.kind === "subitem" && activeOption.parentValue) {
+      setExpandedTask(activeOption.parentValue);
+    }
+  }, [activeTask, taskOptions]);
 
   useEffect(() => {
     return () => {
@@ -108,24 +141,6 @@ function WorkView({
       textareaRef.current?.focus();
     }
   }, [focusSignal]);
-
-  function onDividerPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-
-  function onDividerPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-    const rect = splitRef.current?.getBoundingClientRect();
-    if (!rect || rect.height === 0) return;
-    setTopRatio(clampRatio(((e.clientY - rect.top) / rect.height) * 100));
-  }
-
-  function onDividerPointerUp(e: React.PointerEvent<HTMLDivElement>) {
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
-  }
 
   return (
     <div className="work-view">
@@ -155,76 +170,84 @@ function WorkView({
 
       {tasks.length > 0 && (
         <div className="task-bar">
-          {tasks.map((task) => (
-            <span
-              key={task}
-              className={`task-chip${task === activeTask ? " active" : ""}`}
-            >
-              {task}
-            </span>
-          ))}
+          {tasks.map((task) => {
+            const subtasks = taskOptions.filter(
+              (option) => option.kind === "subitem" && option.parentValue === task,
+            );
+            const isExpanded = expandedTask === task;
+            return (
+              <span className="task-chip-group" key={task}>
+                <button
+                  className={[
+                    "task-chip",
+                    task === activeTask ? "active" : "",
+                    pendingTask === task ? "pending" : "",
+                    subtasks.length > 0 ? "has-subtasks" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  type="button"
+                  disabled={pendingTask === task}
+                  onClick={() => handleParentTaskClick(task, subtasks.length > 0)}
+                  aria-pressed={task === activeTask}
+                  aria-expanded={subtasks.length > 0 ? isExpanded : undefined}
+                >
+                  <span>{task}</span>
+                  {subtasks.length > 0 && (
+                    <span className="task-chip-count">{subtasks.length}</span>
+                  )}
+                </button>
+                {isExpanded &&
+                  subtasks.map((subtask) => (
+                    <button
+                      key={subtask.value}
+                      className={[
+                        "task-chip",
+                        "subtask",
+                        subtask.value === activeTask ? "active" : "",
+                        pendingTask === subtask.value ? "pending" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      type="button"
+                      disabled={pendingTask === subtask.value}
+                      onClick={() => handleSubtaskClick(subtask.value, task)}
+                      aria-pressed={subtask.value === activeTask}
+                      title={subtask.value}
+                    >
+                      {subtask.label}
+                    </button>
+                  ))}
+              </span>
+            );
+          })}
         </div>
       )}
 
-      <div className="workspace-split" ref={splitRef}>
-        <section
-          className={`workspace-pane note-pane${noteActive ? "" : " inactive"}`}
-          style={{ flex: `0 0 ${topRatio}%` }}
-        >
-          <textarea
-            ref={textareaRef}
-            className="markdown-editor"
-            value={draftNote}
-            readOnly={!noteActive}
-            onFocus={() => setFocus("note")}
-            onChange={(e) => handleNoteChange(e.target.value)}
-            onBlur={flushDraft}
-            spellCheck={false}
-          />
-          {!noteActive && (
-            <button
-              className="pane-overlay"
-              aria-label="Note 활성화"
-              onClick={activateNote}
+      <div className="workspace-split">
+        {noteActive ? (
+          <section className="workspace-pane note-pane">
+            <textarea
+              ref={textareaRef}
+              className="markdown-editor"
+              value={draftNote}
+              onFocus={() => setFocus("note")}
+              onChange={(e) => handleNoteChange(e.target.value)}
+              onBlur={flushDraft}
+              spellCheck={false}
             />
-          )}
-        </section>
-
-        <div
-          className="split-divider"
-          role="separator"
-          aria-orientation="horizontal"
-          onPointerDown={onDividerPointerDown}
-          onPointerMove={onDividerPointerMove}
-          onPointerUp={onDividerPointerUp}
-        >
-          <span className="split-grip" />
-        </div>
-
-        <section
-          className={`workspace-pane kanban-pane${kanbanActive ? "" : " inactive"}`}
-        >
-          <KanbanBoard
-            markdown={kanbanMarkdown}
-            onChange={onNoteChange}
-            active={kanbanActive}
-          />
-          {!kanbanActive && (
-            <button
-              className="pane-overlay"
-              aria-label="Kanban 활성화"
-              onClick={activateKanban}
+          </section>
+        ) : (
+          <section className="workspace-pane kanban-pane">
+            <KanbanBoard
+              markdown={kanbanMarkdown}
+              onChange={onNoteChange}
             />
-          )}
-        </section>
+          </section>
+        )}
       </div>
 
-      <div className="editor-footer">
-        <span className="hint">
-          두 뷰가 동시 동기화 — 클릭한 쪽이 활성화됩니다. ## 제목은 컬럼, - [ ]
-          항목은 카드. 카드는 왼쪽 핸들로 드래그해 이동.
-        </span>
-      </div>
+      {footerAction && <div className="editor-footer">{footerAction}</div>}
     </div>
   );
 }

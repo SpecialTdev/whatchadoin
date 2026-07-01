@@ -1,10 +1,19 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import LeftSidebar from "../components/LeftSidebar";
 import RightSidebar from "../components/RightSidebar";
 import WorkView from "../components/WorkView";
 import ReportView from "../components/ReportView";
 import SettingsView from "../components/SettingsView";
-import { parseMarkdown, serializeBoard, newCard, newColumn } from "../lib/kanban";
+import {
+  appendTaskToProgress,
+  extractOpenTaskOptions,
+  extractOpenTasks,
+} from "../lib/kanban";
 import { DEFAULT_NOTE, loadNote } from "../lib/note";
 import {
   fetchEvents,
@@ -12,6 +21,7 @@ import {
   workDayKey,
   type TrackedEvent,
 } from "../lib/events";
+import { latestMemoByTask } from "../lib/checkinMemo";
 import type {
   CheckInMode,
   CheckInStatus,
@@ -26,17 +36,26 @@ const MIN_SEC = 60;
 const MAX_SEC = 1800;
 const DEFAULT_SEC = 60;
 const STORAGE_KEY = "checkin.intervalSec";
-const COLUMN_HEADING_RE = /^##\s+/;
-const CHECKBOX_TASK_RE = /^\s*[-*]\s+\[([ xX])\]\s?(.*)$/;
-const BULLET_TASK_RE = /^\s*[-*]\s+(.*)$/;
 
 // 리포트 하루 경계 시각(시): 자정~오전 11시. 이 시각 전 이벤트는 전날 업무일로 묶인다.
 const MIN_BOUNDARY = 0;
 const MAX_BOUNDARY = 11;
 const DEFAULT_BOUNDARY = 5;
 const BOUNDARY_KEY = "report.dayBoundaryHour";
+const LEFT_SIDEBAR_KEY = "layout.leftSidebarVisible";
+const RIGHT_SIDEBAR_KEY = "layout.rightSidebarVisible";
+const RIGHT_SIDEBAR_WIDTH_KEY = "layout.rightSidebarWidth";
+const DEFAULT_RIGHT_SIDEBAR_WIDTH = 200;
+const MIN_RIGHT_SIDEBAR_WIDTH = 160;
+const MAX_RIGHT_SIDEBAR_WIDTH = 420;
+const MIN_MAIN_WIDTH = 320;
+const RIGHT_SIDEBAR_KEYBOARD_STEP = 10;
 
 type TauriCore = typeof import("@tauri-apps/api/core");
+
+type PlatformInfo = {
+  os: string;
+};
 
 let coreApiPromise: Promise<TauriCore> | null = null;
 
@@ -76,42 +95,58 @@ function loadBoundaryHour(): number {
   }
 }
 
-// 노트(todo)에서 체크인 후보를 뽑는다: 미완료·비어있지 않은 항목, 중복 제거.
-function deriveTasks(note: string): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-
-  let insideColumn = false;
-  for (const raw of note.split("\n")) {
-    if (COLUMN_HEADING_RE.test(raw)) {
-      insideColumn = true;
-      continue;
-    }
-    if (!insideColumn) continue;
-
-    const checkbox = raw.match(CHECKBOX_TASK_RE);
-    if (checkbox) {
-      if (checkbox[1].toLowerCase() !== "x") {
-        const task = checkbox[2].trim();
-        if (task && !seen.has(task)) {
-          seen.add(task);
-          out.push(task);
-        }
-      }
-      continue;
-    }
-
-    const bullet = raw.match(BULLET_TASK_RE);
-    if (bullet) {
-      const task = bullet[1].trim();
-      if (task && !seen.has(task)) {
-        seen.add(task);
-        out.push(task);
-      }
-    }
+function loadStoredBoolean(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    return raw === "true";
+  } catch {
+    return fallback;
   }
+}
 
-  return out;
+function loadStoredNumber(key: string, fallback: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function storeBoolean(key: string, value: boolean): void {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // 저장 실패는 무시 (세션 한정으로 동작)
+  }
+}
+
+function storeNumber(key: string, value: number): void {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // 저장 실패는 무시 (세션 한정으로 동작)
+  }
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function readCssPixelValue(style: CSSStyleDeclaration, name: string): number {
+  const value = Number.parseFloat(style.getPropertyValue(name));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function detectInitialPlatform(): string {
+  const platform = navigator.platform || navigator.userAgent;
+  if (/win/i.test(platform)) return "windows";
+  if (/mac/i.test(platform)) return "macos";
+  if (/linux/i.test(platform)) return "linux";
+  return "unknown";
 }
 
 function sameStringArray(a: string[], b: string[]): boolean {
@@ -131,18 +166,25 @@ function useStableStringArray(values: string[]): string[] {
   }, [values]);
 }
 
-// 체크인에서 입력한 새 작업을 노트의 '진행 중'(없으면 첫 컬럼/신규 컬럼)에 추가한다.
-function appendTask(note: string, task: string): string {
-  const board = parseMarkdown(note);
-  if (board.columns.length === 0) board.columns.push(newColumn("진행 중"));
-  const target =
-    board.columns.find((c) => c.title.includes("진행")) ?? board.columns[0];
-  target.cards.push(newCard(task));
-  return serializeBoard(board);
-}
-
 function App() {
   const [tab, setTab] = useState<Tab>("work");
+  const [platformOs, setPlatformOs] = useState<string>(() =>
+    detectInitialPlatform(),
+  );
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+  const [leftSidebarVisible, setLeftSidebarVisible] = useState<boolean>(() =>
+    loadStoredBoolean(LEFT_SIDEBAR_KEY, true),
+  );
+  const [rightSidebarVisible, setRightSidebarVisible] = useState<boolean>(() =>
+    loadStoredBoolean(RIGHT_SIDEBAR_KEY, true),
+  );
+  const [rightSidebarWidth, setRightSidebarWidth] = useState<number>(() =>
+    clampNumber(
+      loadStoredNumber(RIGHT_SIDEBAR_WIDTH_KEY, DEFAULT_RIGHT_SIDEBAR_WIDTH),
+      MIN_RIGHT_SIDEBAR_WIDTH,
+      MAX_RIGHT_SIDEBAR_WIDTH,
+    ),
+  );
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [note, setNote] = useState<string>(DEFAULT_NOTE);
   const [activeTask, setActiveTask] = useState<string | null>(null);
@@ -157,7 +199,20 @@ function App() {
   );
   // 리포트용 이벤트 목록 (report 탭 진입 시 Rust에서 로드).
   const [reportEvents, setReportEvents] = useState<TrackedEvent[]>([]);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const rightSidebarWidthRef = useRef(rightSidebarWidth);
   const noteRef = useRef(note);
+
+  useEffect(() => {
+    rightSidebarWidthRef.current = rightSidebarWidth;
+  }, [rightSidebarWidth]);
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+    };
+  }, []);
 
   // 시작 시 OS 알림 권한을 확보한다 (없으면 체크인·타이머 알림이 조용히 무시됨).
   useEffect(() => {
@@ -196,17 +251,26 @@ function App() {
   }, []);
 
   // 체크인 후보 = 노트의 실제 todo 항목
-  const derivedTasks = useMemo(() => deriveTasks(note), [note]);
+  const derivedTasks = useMemo(() => extractOpenTasks(note), [note]);
   const tasks = useStableStringArray(derivedTasks);
+  const taskOptions = useMemo(() => extractOpenTaskOptions(note), [note]);
 
   const tasksRef = useRef(tasks);
+  const taskOptionsRef = useRef(taskOptions);
   const activeTaskRef = useRef(activeTask);
+  const checkInModeRef = useRef(checkInMode);
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
   useEffect(() => {
+    taskOptionsRef.current = taskOptions;
+  }, [taskOptions]);
+  useEffect(() => {
     activeTaskRef.current = activeTask;
   }, [activeTask]);
+  useEffect(() => {
+    checkInModeRef.current = checkInMode;
+  }, [checkInMode]);
 
   const applyCheckInStatus = useCallback((status: CheckInStatus) => {
     setCheckInMode(status.mode);
@@ -217,6 +281,188 @@ function App() {
     noteRef.current = note;
   }, [note]);
 
+  useEffect(() => {
+    coreApi()
+      .then(({ invoke }) => invoke<PlatformInfo>("get_platform_info"))
+      .then((info) => setPlatformOs(info.os))
+      .catch((e) => console.error("[App] get_platform_info failed:", e));
+  }, []);
+
+  const isMacos = platformOs === "macos";
+  const isWindows = platformOs === "windows";
+  const hasAppTitlebar = isMacos || isWindows;
+
+  useEffect(() => {
+    if (!isWindows) {
+      setIsWindowMaximized(false);
+      return;
+    }
+
+    let cancelled = false;
+    async function syncWindowMaximized() {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const maximized = await getCurrentWindow().isMaximized();
+        if (!cancelled) setIsWindowMaximized(maximized);
+      } catch (e) {
+        console.error("[App] isMaximized failed:", e);
+      }
+    }
+
+    syncWindowMaximized();
+    window.addEventListener("resize", syncWindowMaximized);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("resize", syncWindowMaximized);
+    };
+  }, [isWindows]);
+
+  useEffect(() => {
+    storeBoolean(LEFT_SIDEBAR_KEY, leftSidebarVisible);
+  }, [leftSidebarVisible]);
+
+  useEffect(() => {
+    storeBoolean(RIGHT_SIDEBAR_KEY, rightSidebarVisible);
+  }, [rightSidebarVisible]);
+
+  const getClampedRightSidebarWidth = useCallback((value: number): number => {
+    const layoutEl = layoutRef.current;
+    if (!layoutEl) {
+      return clampNumber(value, MIN_RIGHT_SIDEBAR_WIDTH, MAX_RIGHT_SIDEBAR_WIDTH);
+    }
+
+    const rect = layoutEl.getBoundingClientRect();
+    const style = getComputedStyle(layoutEl);
+    const leftWidth = readCssPixelValue(style, "--left-sidebar-width");
+    const maxByLayout = Math.max(
+      MIN_RIGHT_SIDEBAR_WIDTH,
+      rect.width - leftWidth - MIN_MAIN_WIDTH,
+    );
+    return clampNumber(
+      value,
+      MIN_RIGHT_SIDEBAR_WIDTH,
+      Math.min(MAX_RIGHT_SIDEBAR_WIDTH, maxByLayout),
+    );
+  }, []);
+
+  const commitRightSidebarWidth = useCallback(
+    (value: number) => {
+      const nextWidth = getClampedRightSidebarWidth(Math.round(value));
+      rightSidebarWidthRef.current = nextWidth;
+      layoutRef.current?.style.setProperty(
+        "--right-sidebar-width",
+        `${nextWidth}px`,
+      );
+      setRightSidebarWidth(nextWidth);
+      storeNumber(RIGHT_SIDEBAR_WIDTH_KEY, nextWidth);
+    },
+    [getClampedRightSidebarWidth],
+  );
+
+  const widthFromPointerX = useCallback(
+    (clientX: number): number => {
+      const layoutEl = layoutRef.current;
+      if (!layoutEl) return rightSidebarWidthRef.current;
+      const rect = layoutEl.getBoundingClientRect();
+      return getClampedRightSidebarWidth(rect.right - clientX);
+    },
+    [getClampedRightSidebarWidth],
+  );
+
+  const handleRightSidebarSplitterPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!rightSidebarVisible || event.button !== 0) return;
+
+      event.preventDefault();
+      const splitter = event.currentTarget;
+      const layoutEl = layoutRef.current;
+      splitter.setPointerCapture(event.pointerId);
+      document.body.classList.add("right-sidebar-resizing");
+      layoutEl?.classList.add("right-sidebar-resizing");
+
+      const updateWidth = (clientX: number) => {
+        const nextWidth = widthFromPointerX(clientX);
+        rightSidebarWidthRef.current = nextWidth;
+        layoutEl?.style.setProperty("--right-sidebar-width", `${nextWidth}px`);
+      };
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        moveEvent.preventDefault();
+        updateWidth(moveEvent.clientX);
+      };
+
+      const finishDrag = (upEvent?: PointerEvent) => {
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", finishDrag);
+        window.removeEventListener("pointercancel", finishDrag);
+        document.body.classList.remove("right-sidebar-resizing");
+        layoutEl?.classList.remove("right-sidebar-resizing");
+        dragCleanupRef.current = null;
+
+        if (splitter.hasPointerCapture(event.pointerId)) {
+          splitter.releasePointerCapture(event.pointerId);
+        }
+        if (upEvent) updateWidth(upEvent.clientX);
+        commitRightSidebarWidth(rightSidebarWidthRef.current);
+      };
+
+      dragCleanupRef.current = () => finishDrag();
+      updateWidth(event.clientX);
+      window.addEventListener("pointermove", handlePointerMove, {
+        passive: false,
+      });
+      window.addEventListener("pointerup", finishDrag);
+      window.addEventListener("pointercancel", finishDrag);
+    },
+    [
+      commitRightSidebarWidth,
+      rightSidebarVisible,
+      widthFromPointerX,
+    ],
+  );
+
+  const handleRightSidebarSplitterKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (!rightSidebarVisible) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const direction = event.key === "ArrowLeft" ? 1 : -1;
+      commitRightSidebarWidth(
+        rightSidebarWidthRef.current + direction * RIGHT_SIDEBAR_KEYBOARD_STEP,
+      );
+    },
+    [commitRightSidebarWidth, rightSidebarVisible],
+  );
+
+  const handleWindowMinimize = useCallback(async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().minimize();
+    } catch (e) {
+      console.error("[App] minimize failed:", e);
+    }
+  }, []);
+
+  const handleWindowToggleMaximize = useCallback(async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      await win.toggleMaximize();
+      setIsWindowMaximized(await win.isMaximized());
+    } catch (e) {
+      console.error("[App] toggleMaximize failed:", e);
+    }
+  }, []);
+
+  const handleWindowClose = useCallback(async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().close();
+    } catch (e) {
+      console.error("[App] close failed:", e);
+    }
+  }, []);
+
   // 체크인 주기는 Rust 백그라운드 타이머가 관리한다. 메인 웹뷰가 닫혀도
   // 최신 후보/활성 작업/주기만 유지되면 checkin 창을 계속 띄울 수 있다.
   useEffect(() => {
@@ -224,21 +470,22 @@ function App() {
       .then(({ invoke }) =>
         invoke("update_checkin_context", {
           tasks,
+          taskOptions,
           activeTask,
           intervalSec,
         }),
       )
       .catch((e) => console.error("[App] update_checkin_context failed:", e));
-  }, [tasks, activeTask, intervalSec]);
+  }, [tasks, taskOptions, activeTask, intervalSec]);
 
   const handleCheckInSubmit = useCallback((task: string) => {
     setActiveTask(task);
     // 노트에 없던 새 작업이면 실제 todo로 편입
     setNote((prev) => {
       const latest = noteRef.current || prev;
-      const next = deriveTasks(latest).includes(task)
+      const next = extractOpenTaskOptions(latest).some((option) => option.value === task)
         ? latest
-        : appendTask(latest, task);
+        : appendTaskToProgress(latest, task);
       noteRef.current = next;
       return next;
     });
@@ -331,6 +578,7 @@ function App() {
       console.log("[App] invoking open_checkin, tasks:", tasksRef.current, "activeTask:", activeTaskRef.current);
       await invoke("open_checkin", {
         tasks: tasksRef.current,
+        taskOptions: taskOptionsRef.current,
         activeTask: activeTaskRef.current,
       });
       console.log("[App] open_checkin returned");
@@ -338,6 +586,24 @@ function App() {
       console.error("[App] open_checkin error:", e);
     }
   }, []);
+
+  const handleTaskChipCheckIn = useCallback(async (task: string) => {
+    try {
+      const { invoke } = await coreApi();
+      const events = await fetchEvents();
+      const memo = latestMemoByTask(events)[task] ?? "";
+
+      if (checkInModeRef.current !== "working") {
+        const status = await invoke<CheckInStatus>("clock_in");
+        applyCheckInStatus(status);
+      }
+
+      await invoke("submit_checkin", { task, memo });
+    } catch (e) {
+      console.error("[App] task chip check-in failed:", e);
+      throw e;
+    }
+  }, [applyCheckInStatus]);
 
   const runCheckInStatusCommand = useCallback(
     async (command: "clock_in" | "clock_out" | "end_break") => {
@@ -360,6 +626,48 @@ function App() {
         : activeTask
           ? `근무 중 · ${activeTask}`
           : "근무 중";
+
+  const workSessionControls = (
+    <div className={`work-session-controls ${checkInMode}`}>
+      <span className="work-session-label">{sessionLabel}</span>
+      {checkInMode === "off" ? (
+        <button
+          className="work-session-btn primary"
+          type="button"
+          onClick={() => runCheckInStatusCommand("clock_in")}
+        >
+          출근
+        </button>
+      ) : (
+        <>
+          {checkInMode === "break" ? (
+            <button
+              className="work-session-btn primary"
+              type="button"
+              onClick={() => runCheckInStatusCommand("end_break")}
+            >
+              휴식 종료
+            </button>
+          ) : (
+            <button
+              className="work-session-btn"
+              type="button"
+              onClick={openCheckIn}
+            >
+              체크인
+            </button>
+          )}
+          <button
+            className="work-session-btn danger"
+            type="button"
+            onClick={() => runCheckInStatusCommand("clock_out")}
+          >
+            퇴근
+          </button>
+        </>
+      )}
+    </div>
+  );
 
   // report 탭 진입 시 이벤트를 로드한다 (리포트는 회고용이라 진입 시 새로고침으로 충분).
   useEffect(() => {
@@ -403,9 +711,114 @@ function App() {
     [reportEvents, dayBoundaryHour, selectedDate],
   );
 
+  const layoutClassName = [
+    "layout",
+    isMacos ? "macos-titlebar" : "",
+    isWindows ? "windows-titlebar" : "",
+    leftSidebarVisible ? "" : "left-sidebar-collapsed",
+    rightSidebarVisible ? "" : "right-sidebar-collapsed",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className="layout">
+    <div
+      ref={layoutRef}
+      className={layoutClassName}
+      style={
+        {
+          "--right-sidebar-width": rightSidebarVisible
+            ? `${rightSidebarWidth}px`
+            : "0px",
+        } as CSSProperties
+      }
+    >
+      {hasAppTitlebar && (
+        <div
+          className={[
+            "native-titlebar-controls",
+            isMacos ? "macos" : "",
+            isWindows ? "windows" : "",
+            isWindowMaximized ? "is-window-maximized" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          <div
+            className="titlebar-drag-region"
+            data-tauri-drag-region
+            onDoubleClick={
+              isWindows
+                ? () => {
+                    void handleWindowToggleMaximize();
+                  }
+                : undefined
+            }
+          />
+          <div className="native-titlebar-title">Whatchadoin</div>
+          <button
+            className="sidebar-toggle left"
+            type="button"
+            aria-label={
+              leftSidebarVisible ? "왼쪽 사이드바 접기" : "왼쪽 사이드바 펼치기"
+            }
+            aria-pressed={leftSidebarVisible}
+            onClick={() => setLeftSidebarVisible((visible) => !visible)}
+          >
+            <span className="sidebar-toggle-icon" aria-hidden="true" />
+          </button>
+          <button
+            className="sidebar-toggle right"
+            type="button"
+            aria-label={
+              rightSidebarVisible
+                ? "오른쪽 사이드바 접기"
+                : "오른쪽 사이드바 펼치기"
+            }
+            aria-pressed={rightSidebarVisible}
+            onClick={() => setRightSidebarVisible((visible) => !visible)}
+          >
+            <span className="sidebar-toggle-icon" aria-hidden="true" />
+          </button>
+          {isWindows && (
+            <div className="window-controls" aria-label="창 제어">
+              <button
+                className="window-control minimize"
+                type="button"
+                aria-label="창 최소화"
+                onClick={() => {
+                  void handleWindowMinimize();
+                }}
+              >
+                <span aria-hidden="true" />
+              </button>
+              <button
+                className="window-control maximize"
+                type="button"
+                aria-label={isWindowMaximized ? "창 복원" : "창 최대화"}
+                onClick={() => {
+                  void handleWindowToggleMaximize();
+                }}
+              >
+                <span aria-hidden="true" />
+              </button>
+              <button
+                className="window-control close"
+                type="button"
+                aria-label="창 닫기"
+                onClick={() => {
+                  void handleWindowClose();
+                }}
+              >
+                <span aria-hidden="true" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       <LeftSidebar
+        className={leftSidebarVisible ? "" : "hidden"}
         tab={tab}
         onTabChange={setTab}
         dates={reportDates}
@@ -420,8 +833,11 @@ function App() {
             onNoteChange={setNote}
             onNoteDraftChange={handleNoteDraftChange}
             tasks={tasks}
+            taskOptions={taskOptions}
             activeTask={activeTask}
+            onTaskCheckIn={handleTaskChipCheckIn}
             focusSignal={noteFocusNonce}
+            footerAction={workSessionControls}
           />
         ) : tab === "report" ? (
           <ReportView
@@ -443,47 +859,22 @@ function App() {
         )}
       </main>
 
-      <RightSidebar />
+      {rightSidebarVisible && (
+        <div
+          className="right-sidebar-splitter"
+          role="separator"
+          aria-label="오른쪽 사이드바 크기 조절"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_RIGHT_SIDEBAR_WIDTH}
+          aria-valuemax={MAX_RIGHT_SIDEBAR_WIDTH}
+          aria-valuenow={rightSidebarWidth}
+          tabIndex={0}
+          onPointerDown={handleRightSidebarSplitterPointerDown}
+          onKeyDown={handleRightSidebarSplitterKeyDown}
+        />
+      )}
 
-      <div className={`work-session-controls ${checkInMode}`}>
-        <span className="work-session-label">{sessionLabel}</span>
-        {checkInMode === "off" ? (
-          <button
-            className="work-session-btn primary"
-            type="button"
-            onClick={() => runCheckInStatusCommand("clock_in")}
-          >
-            출근
-          </button>
-        ) : (
-          <>
-            {checkInMode === "break" ? (
-              <button
-                className="work-session-btn primary"
-                type="button"
-                onClick={() => runCheckInStatusCommand("end_break")}
-              >
-                휴식 종료
-              </button>
-            ) : (
-              <button
-                className="work-session-btn"
-                type="button"
-                onClick={openCheckIn}
-              >
-                체크인
-              </button>
-            )}
-            <button
-              className="work-session-btn danger"
-              type="button"
-              onClick={() => runCheckInStatusCommand("clock_out")}
-            >
-              퇴근
-            </button>
-          </>
-        )}
-      </div>
+      <RightSidebar className={rightSidebarVisible ? "" : "hidden"} />
     </div>
   );
 }

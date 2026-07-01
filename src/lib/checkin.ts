@@ -5,6 +5,15 @@ export interface CheckInStatus {
   mode: CheckInMode;
 }
 
+export type CheckInTaskKind = "parent" | "subitem";
+
+export interface CheckInTaskOption {
+  kind: CheckInTaskKind;
+  label: string;
+  value: string;
+  parentValue?: string;
+}
+
 export interface CheckInSubmitEvent {
   task: string;
   memo: string;

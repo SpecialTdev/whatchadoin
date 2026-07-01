@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   checkInMemoPoints,
   type CheckInMemoPoint,
@@ -101,6 +102,12 @@ function memoAtTime(
 
 function ReportView({ date, events, checkinIntervalSec }: Props) {
   const [memoPopup, setMemoPopup] = useState<MemoPopup | null>(null);
+  const [reportNote, setReportNote] = useState("");
+  const [reportNoteStatus, setReportNoteStatus] = useState<
+    "loading" | "saved" | "saving" | "error"
+  >("loading");
+  const reportNoteLoadedRef = useRef(false);
+  const lastSavedReportNoteRef = useRef("");
   const memoPoints = useMemo(() => checkInMemoPoints(events), [events]);
   const noteEvents = useMemo(() => events.filter((e) => e.kind === "note"), [events]);
   const checkins = useMemo(
@@ -111,6 +118,87 @@ function ReportView({ date, events, checkinIntervalSec }: Props) {
   useEffect(() => {
     setMemoPopup(null);
   }, [date]);
+
+  useEffect(() => {
+    let cancelled = false;
+    reportNoteLoadedRef.current = false;
+    lastSavedReportNoteRef.current = "";
+    setReportNoteStatus("loading");
+    setReportNote("");
+
+    if (!date) {
+      setReportNoteStatus("saved");
+      return;
+    }
+
+    invoke<string>("get_report_note", { date })
+      .then((note) => {
+        if (cancelled) return;
+        setReportNote(note);
+        lastSavedReportNoteRef.current = note;
+        reportNoteLoadedRef.current = true;
+        setReportNoteStatus("saved");
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        console.error("[ReportView] get_report_note failed:", e);
+        reportNoteLoadedRef.current = true;
+        setReportNoteStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [date]);
+
+  useEffect(() => {
+    if (!date || !reportNoteLoadedRef.current) return;
+    if (reportNote === lastSavedReportNoteRef.current) {
+      setReportNoteStatus("saved");
+      return;
+    }
+    setReportNoteStatus("saving");
+    const timer = window.setTimeout(() => {
+      invoke("save_report_note", { date, note: reportNote })
+        .then(() => {
+          lastSavedReportNoteRef.current = reportNote;
+          setReportNoteStatus("saved");
+        })
+        .catch((e) => {
+          console.error("[ReportView] save_report_note failed:", e);
+          setReportNoteStatus("error");
+        });
+    }, 600);
+
+    return () => window.clearTimeout(timer);
+  }, [date, reportNote]);
+
+  const reportNoteStatusText =
+    reportNoteStatus === "loading"
+      ? "불러오는 중"
+      : reportNoteStatus === "saving"
+        ? "저장 중"
+        : reportNoteStatus === "error"
+          ? "저장 실패"
+          : "저장됨";
+
+  const reportNoteSection = (
+    <section className="report-section report-note-section">
+      <div className="report-note-header">
+        <h2>내 note</h2>
+        <span className={`report-note-status ${reportNoteStatus}`}>
+          {reportNoteStatusText}
+        </span>
+      </div>
+      <textarea
+        className="report-note-editor"
+        value={reportNote}
+        placeholder="오늘의 판단, 다음 액션, 신경 쓰이는 점을 적어두기..."
+        disabled={!date || reportNoteStatus === "loading"}
+        onChange={(event) => setReportNote(event.target.value)}
+      />
+    </section>
+  );
 
   if (!date || events.length === 0) {
     return (
@@ -125,6 +213,7 @@ function ReportView({ date, events, checkinIntervalSec }: Props) {
             노트를 수정하거나 체크인에 응답하면 이벤트가 쌓입니다.
           </p>
         </div>
+        {date && reportNoteSection}
       </div>
     );
   }
@@ -301,6 +390,8 @@ function ReportView({ date, events, checkinIntervalSec }: Props) {
           </div>
         </div>
       </section>
+
+      {reportNoteSection}
 
       {memoPopup && (
         <div

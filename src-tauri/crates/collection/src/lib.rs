@@ -150,6 +150,31 @@ impl Collector {
         }
     }
 
+    /// 저장된 이벤트를 최신순으로 페이지 단위 반환한다 (right sidebar 무한스크롤용).
+    pub fn events_page(&self, limit: i64, offset: i64) -> Vec<Event> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT id, ts, kind, text FROM events
+             ORDER BY ts DESC, id DESC
+             LIMIT ?1 OFFSET ?2",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = stmt.query_map(params![limit, offset], |row| {
+            let kind: String = row.get(2)?;
+            Ok(Event {
+                id: row.get(0)?,
+                ts: row.get(1)?,
+                kind: kind_from_str(&kind),
+                text: row.get(3)?,
+            })
+        });
+        match rows {
+            Ok(iter) => iter.filter_map(Result::ok).collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// 열린 DB에서 일관된 SQLite 스냅샷 파일을 만든 뒤, 요청 단계에 따라
     /// 내보낸 파일에만 비식별화를 적용한다.
     pub fn export_to(&self, dest: &Path, privacy_level: ExportPrivacyLevel) -> rusqlite::Result<()> {
@@ -720,6 +745,27 @@ mod tests {
         assert_eq!(
             events[0].text,
             "체크인 — 'Write PR' 작업 중\n\n## 메모\n- [x] context"
+        );
+
+        drop(collector);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn events_page_returns_latest_slice() {
+        let (db_path, _) = temp_db_paths("events-page");
+        let _ = std::fs::remove_file(&db_path);
+
+        let collector = Collector::open(&db_path).unwrap();
+        collector.insert(EventKind::Note, "first").unwrap();
+        collector.insert(EventKind::Checkin, "second").unwrap();
+        collector.insert(EventKind::Window, "third").unwrap();
+
+        let page = collector.events_page(2, 1);
+        assert_eq!(page.len(), 2);
+        assert_eq!(
+            page.iter().map(|event| event.text.as_str()).collect::<Vec<_>>(),
+            vec!["second", "first"]
         );
 
         drop(collector);

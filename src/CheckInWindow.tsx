@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { CheckInStatus } from "./lib/checkin";
+import type { CheckInStatus, CheckInTaskOption } from "./lib/checkin";
 import { latestMemoByTask } from "./lib/checkinMemo";
 import { fetchEvents } from "./lib/events";
 import { renderMarkdown } from "./lib/markdown";
@@ -10,7 +11,12 @@ import "./CheckInWindow.css";
 
 interface CheckInData extends CheckInStatus {
   tasks: string[];
+  task_options?: CheckInTaskOption[];
 }
+
+const MEMO_COLLAPSED_STORAGE_KEY = "checkin:memo-collapsed";
+const CHECKIN_MEMO_HEIGHT_DELTA = 220;
+const CHECKIN_MIN_HEIGHT = 320;
 
 function CheckInWindow() {
   const [data, setData] = useState<CheckInData | null>(null);
@@ -20,6 +26,16 @@ function CheckInWindow() {
   const [memoByTask, setMemoByTask] = useState<Record<string, string>>({});
   const [memoDirty, setMemoDirty] = useState(false);
   const [showNewTaskInput, setShowNewTaskInput] = useState(false);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
+  const [memoCollapsed, setMemoCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem(MEMO_COLLAPSED_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const initialCollapsedResizeAppliedRef = useRef(false);
+  const taskOptionsRef = useRef<CheckInTaskOption[]>([]);
 
   function fillMemoForTask(task: string, memos = memoByTask) {
     setMemo(task ? memos[task] ?? "" : "");
@@ -31,6 +47,22 @@ function CheckInWindow() {
     fillMemoForTask(task);
   }
 
+  function selectParentTask(task: string, hasSubtasks: boolean) {
+    selectExistingTask(task);
+    setExpandedTask(hasSubtasks ? task : null);
+  }
+
+  function selectSubtask(task: string, parentTask: string) {
+    selectExistingTask(task);
+    setExpandedTask(parentTask);
+  }
+
+  function getTaskOptions(d: CheckInData): CheckInTaskOption[] {
+    return d.task_options && d.task_options.length > 0
+      ? d.task_options
+      : d.tasks.map((task) => ({ kind: "parent", label: task, value: task }));
+  }
+
   function handleNewTaskChange(value: string) {
     setNewTask(value);
     if (!memoDirty) fillMemoForTask(value.trim());
@@ -39,6 +71,34 @@ function CheckInWindow() {
   function handleMemoChange(value: string) {
     setMemo(value);
     setMemoDirty(true);
+  }
+
+  async function offsetCheckInWindowHeight(delta: number) {
+    const win = getCurrentWindow();
+    const [innerSize, scaleFactor] = await Promise.all([win.innerSize(), win.scaleFactor()]);
+    const logicalSize = innerSize.toLogical(scaleFactor);
+    await win.setSize(
+      new LogicalSize(logicalSize.width, Math.max(CHECKIN_MIN_HEIGHT, logicalSize.height + delta)),
+    );
+  }
+
+  async function resizeMemoWindow(collapsed: boolean) {
+    try {
+      await offsetCheckInWindowHeight(collapsed ? -CHECKIN_MEMO_HEIGHT_DELTA : CHECKIN_MEMO_HEIGHT_DELTA);
+    } catch (e) {
+      console.error("[CheckInWindow] resize failed:", e);
+    }
+  }
+
+  function toggleMemoCollapsed() {
+    const next = !memoCollapsed;
+    setMemoCollapsed(next);
+    try {
+      window.localStorage.setItem(MEMO_COLLAPSED_STORAGE_KEY, String(next));
+    } catch (e) {
+      console.error("[CheckInWindow] memo collapse preference save failed:", e);
+    }
+    resizeMemoWindow(next);
   }
 
   useEffect(() => {
@@ -59,6 +119,9 @@ function CheckInWindow() {
         if (cancelled) return;
         console.log("[CheckInWindow] get_checkin_data returned:", d);
         const task = d.active_task ?? d.tasks[0] ?? "";
+        const options = getTaskOptions(d);
+        const selectedOption = options.find((option) => option.value === task);
+        taskOptionsRef.current = options;
         setData(d);
         setMemoByTask(memos);
         setSelected(task);
@@ -66,6 +129,7 @@ function CheckInWindow() {
         setMemo(task ? memos[task] ?? "" : "");
         setMemoDirty(false);
         setShowNewTaskInput(d.active_task === null);
+        setExpandedTask(selectedOption?.kind === "subitem" ? selectedOption.parentValue ?? null : null);
       } catch (e) {
         console.error("[CheckInWindow] get_checkin_data error:", e);
       }
@@ -93,6 +157,14 @@ function CheckInWindow() {
               : prev,
           );
           setSelected((prev) => event.payload.active_task ?? prev);
+          const option = event.payload.active_task
+            ? taskOptionsRef.current.find(
+                (item) => item.value === event.payload.active_task,
+              )
+            : null;
+          if (option?.kind === "subitem") {
+            setExpandedTask(option.parentValue ?? null);
+          }
         });
         if (cancelled) {
           refreshUnlisten();
@@ -110,6 +182,22 @@ function CheckInWindow() {
       unlisteners.forEach((unlisten) => unlisten());
     };
   }, []);
+
+  useEffect(() => {
+    if (data?.mode !== "working") return;
+    if (!memoCollapsed || initialCollapsedResizeAppliedRef.current) return;
+    initialCollapsedResizeAppliedRef.current = true;
+
+    async function applyInitialCollapsedHeight() {
+      try {
+        await offsetCheckInWindowHeight(-CHECKIN_MEMO_HEIGHT_DELTA);
+      } catch (e) {
+        console.error("[CheckInWindow] initial collapsed resize failed:", e);
+      }
+    }
+
+    applyInitialCollapsedHeight();
+  }, [data?.mode, memoCollapsed]);
 
   function applyStatus(status: CheckInStatus) {
     setData((prev) =>
@@ -234,6 +322,22 @@ function CheckInWindow() {
   }
 
   const submitDisabled = showNewTaskInput ? !newTask.trim() : !selected;
+  const taskOptions = getTaskOptions(data);
+  const parentTaskOptions = taskOptions.filter((option) => option.kind === "parent");
+  const subtaskOptions = taskOptions.filter((option) => option.kind === "subitem");
+  const subtasksByParent = new Map<string, CheckInTaskOption[]>();
+  for (const option of subtaskOptions) {
+    if (!option.parentValue) continue;
+    const options = subtasksByParent.get(option.parentValue) ?? [];
+    options.push(option);
+    subtasksByParent.set(option.parentValue, options);
+  }
+  const memoSnippet = memo.trim().replace(/\s+/g, " ");
+  const memoSummary = memoSnippet
+    ? memoSnippet.length > 36
+      ? `${memoSnippet.slice(0, 36)}...`
+      : memoSnippet
+    : "비어 있음";
 
   return (
     <div className="checkin-window">
@@ -244,15 +348,40 @@ function CheckInWindow() {
 
       {!showNewTaskInput ? (
         <div className="checkin-task-list">
-          {data.tasks.map((task) => (
-            <button
-              key={task}
-              className={`checkin-task-btn${selected === task ? " selected" : ""}`}
-              onClick={() => selectExistingTask(task)}
-            >
-              {task}
-            </button>
-          ))}
+          {parentTaskOptions.map((option) => {
+            const childOptions = subtasksByParent.get(option.value) ?? [];
+            const isExpanded = expandedTask === option.value;
+            return (
+              <div className="checkin-task-group" key={option.value}>
+                <button
+                  className={`checkin-task-btn${
+                    selected === option.value ? " selected" : ""
+                  }${childOptions.length > 0 ? " has-subtasks" : ""}`}
+                  onClick={() => selectParentTask(option.value, childOptions.length > 0)}
+                  aria-expanded={childOptions.length > 0 ? isExpanded : undefined}
+                >
+                  <span>{option.label}</span>
+                  {childOptions.length > 0 && (
+                    <span className="checkin-subtask-count">{childOptions.length}</span>
+                  )}
+                </button>
+                {isExpanded &&
+                  childOptions.map((child) => (
+                  <button
+                    key={child.value}
+                    className={`checkin-task-btn subtask${
+                      selected === child.value ? " selected" : ""
+                    }`}
+                    onClick={() => selectSubtask(child.value, option.value)}
+                    title={child.value}
+                  >
+                    <span className="checkin-task-kind">하위</span>
+                    <span className="checkin-task-label">{child.label}</span>
+                  </button>
+                ))}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <input
@@ -266,27 +395,54 @@ function CheckInWindow() {
         />
       )}
 
-      <div className="checkin-memo-grid">
-        <section className="checkin-memo-pane">
-          <label className="checkin-memo-label" htmlFor="checkin-memo">
-            메모
-          </label>
-          <textarea
-            id="checkin-memo"
-            className="checkin-memo-editor"
-            placeholder="지금 작업 중인 맥락을 마크다운으로 남기기..."
-            value={memo}
-            onChange={(e) => handleMemoChange(e.target.value)}
-            spellCheck={false}
-          />
-        </section>
-        <section className="checkin-memo-pane preview">
-          <span className="checkin-memo-label">미리보기</span>
-          <div className="markdown-preview">
-            {renderMarkdown(memo, "메모를 쓰면 여기에 미리보기가 표시됩니다.")}
+      <section className={`checkin-memo-section${memoCollapsed ? " collapsed" : ""}`}>
+        <button
+          className="checkin-memo-divider"
+          type="button"
+          onClick={toggleMemoCollapsed}
+          aria-expanded={!memoCollapsed}
+          aria-controls="checkin-memo-body"
+        >
+          <span className="checkin-memo-rule" aria-hidden="true" />
+          <span className="checkin-memo-divider-content">
+            <span className="checkin-memo-title">메모</span>
+            <span className="checkin-memo-summary">{memoSummary}</span>
+            <span className="checkin-memo-chevron" aria-hidden="true">
+              {memoCollapsed ? "˅" : "˄"}
+            </span>
+          </span>
+          <span className="checkin-memo-rule" aria-hidden="true" />
+        </button>
+
+        <div
+          id="checkin-memo-body"
+          className="checkin-memo-body"
+          aria-hidden={memoCollapsed}
+        >
+          <div className="checkin-memo-grid">
+            <section className="checkin-memo-pane">
+              <label className="checkin-memo-label" htmlFor="checkin-memo">
+                작성
+              </label>
+              <textarea
+                id="checkin-memo"
+                className="checkin-memo-editor"
+                placeholder="지금 작업 중인 맥락을 마크다운으로 남기기..."
+                value={memo}
+                onChange={(e) => handleMemoChange(e.target.value)}
+                spellCheck={false}
+                tabIndex={memoCollapsed ? -1 : undefined}
+              />
+            </section>
+            <section className="checkin-memo-pane preview">
+              <span className="checkin-memo-label">미리보기</span>
+              <div className="markdown-preview">
+                {renderMarkdown(memo, "메모를 쓰면 여기에 미리보기가 표시됩니다.")}
+              </div>
+            </section>
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
 
       <div className="checkin-actions">
         {!showNewTaskInput ? (

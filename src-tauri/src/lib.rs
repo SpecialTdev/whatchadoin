@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -31,6 +32,7 @@ enum CheckInMode {
 
 struct CheckInState {
     tasks: Vec<String>,
+    task_options: Vec<CheckInTaskOption>,
     active_task: Option<String>,
     interval_sec: u64,
     next_checkin_at: Instant,
@@ -41,6 +43,7 @@ impl Default for CheckInState {
     fn default() -> Self {
         Self {
             tasks: Vec::new(),
+            task_options: Vec::new(),
             active_task: None,
             interval_sec: DEFAULT_CHECKIN_INTERVAL_SEC,
             next_checkin_at: Instant::now() + Duration::from_secs(DEFAULT_CHECKIN_INTERVAL_SEC),
@@ -50,8 +53,51 @@ impl Default for CheckInState {
 }
 
 #[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "snake_case")]
+enum CheckInTaskKind {
+    Parent,
+    Subitem,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct CheckInTaskOption {
+    kind: CheckInTaskKind,
+    label: String,
+    value: String,
+    #[serde(default, rename = "parentValue")]
+    parent_value: Option<String>,
+}
+
+impl<'de> serde::Deserialize<'de> for CheckInTaskKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        match value.as_str() {
+            "parent" => Ok(Self::Parent),
+            "subitem" => Ok(Self::Subitem),
+            other => Err(serde::de::Error::unknown_variant(other, &["parent", "subitem"])),
+        }
+    }
+}
+
+fn parent_task_options(tasks: &[String]) -> Vec<CheckInTaskOption> {
+    tasks
+        .iter()
+        .map(|task| CheckInTaskOption {
+            kind: CheckInTaskKind::Parent,
+            label: task.clone(),
+            value: task.clone(),
+            parent_value: None,
+        })
+        .collect()
+}
+
+#[derive(serde::Serialize, Clone)]
 struct CheckInData {
     tasks: Vec<String>,
+    task_options: Vec<CheckInTaskOption>,
     active_task: Option<String>,
     mode: CheckInMode,
 }
@@ -71,6 +117,18 @@ struct CheckInSubmitEvent {
 #[derive(serde::Serialize)]
 struct ExportedDb {
     path: String,
+}
+
+#[derive(serde::Serialize)]
+struct PlatformInfo {
+    os: &'static str,
+}
+
+#[tauri::command]
+fn get_platform_info() -> PlatformInfo {
+    PlatformInfo {
+        os: std::env::consts::OS,
+    }
 }
 
 // 좌측 사이드바 위젯 한 개. app_data_dir/widgets.json에 JSON으로 영속한다.
@@ -97,6 +155,13 @@ fn note_path(app: &AppHandle) -> Option<PathBuf> {
     let dir = app.path().app_data_dir().ok()?;
     std::fs::create_dir_all(&dir).ok();
     Some(dir.join("workspace-note.md"))
+}
+
+// Report 하단의 날짜별 개인 note를 저장하는 JSON 파일.
+fn report_notes_path(app: &AppHandle) -> Option<PathBuf> {
+    let dir = app.path().app_data_dir().ok()?;
+    std::fs::create_dir_all(&dir).ok();
+    Some(dir.join("report-notes.json"))
 }
 
 // collector가 들고 있는 최신 note 스냅샷을 workspace-note.md에 저장한다.
@@ -134,6 +199,17 @@ fn setup_main_window_close_handler(app: &AppHandle) {
         });
     } else {
         println!("[Rust] main window missing, close-to-tray handler skipped");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn setup_windows_custom_titlebar(app: &AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        if let Err(e) = main.set_decorations(false) {
+            println!("[Rust] failed to disable Windows window decorations: {}", e);
+        }
+    } else {
+        println!("[Rust] main window missing, Windows titlebar setup skipped");
     }
 }
 
@@ -184,7 +260,7 @@ fn build_checkin_window(app: &AppHandle) -> tauri::Result<()> {
     let win = WebviewWindowBuilder::new(app, "checkin", WebviewUrl::App(Default::default()))
         .title("지금 뭐 하고 있어?")
         .inner_size(760.0, 560.0)
-        .min_inner_size(520.0, 420.0)
+        .min_inner_size(520.0, 320.0)
         .center()
         .always_on_top(true)
         .resizable(true)
@@ -273,6 +349,7 @@ fn emit_checkin_status(app: &AppHandle, status: CheckInStatus) {
 fn update_checkin_context(
     state: tauri::State<'_, Mutex<CheckInState>>,
     tasks: Vec<String>,
+    task_options: Option<Vec<CheckInTaskOption>>,
     active_task: Option<String>,
     interval_sec: u64,
 ) {
@@ -280,6 +357,7 @@ fn update_checkin_context(
     let mut s = state.lock().unwrap();
     let interval_changed = s.interval_sec != interval_sec;
 
+    s.task_options = task_options.unwrap_or_else(|| parent_task_options(&tasks));
     s.tasks = tasks;
     s.active_task = active_task;
     s.interval_sec = interval_sec;
@@ -294,6 +372,7 @@ fn open_checkin(
     app: AppHandle,
     state: tauri::State<'_, Mutex<CheckInState>>,
     tasks: Vec<String>,
+    task_options: Option<Vec<CheckInTaskOption>>,
     active_task: Option<String>,
 ) {
     println!(
@@ -302,6 +381,7 @@ fn open_checkin(
     );
     {
         let mut s = state.lock().unwrap();
+        s.task_options = task_options.unwrap_or_else(|| parent_task_options(&tasks));
         s.tasks = tasks;
         s.active_task = active_task;
     }
@@ -318,6 +398,7 @@ fn get_checkin_data(state: tauri::State<'_, Mutex<CheckInState>>) -> CheckInData
     );
     CheckInData {
         tasks: s.tasks.clone(),
+        task_options: s.task_options.clone(),
         active_task: s.active_task.clone(),
         mode: s.mode,
     }
@@ -399,6 +480,14 @@ fn submit_checkin(
         if !s.tasks.iter().any(|t| t == &task) {
             s.tasks.push(task.clone());
         }
+        if !s.task_options.iter().any(|option| option.value == task) {
+            s.task_options.push(CheckInTaskOption {
+                kind: CheckInTaskKind::Parent,
+                label: task.clone(),
+                value: task.clone(),
+                parent_value: None,
+            });
+        }
         if s.mode == CheckInMode::Working {
             s.next_checkin_at = Instant::now() + Duration::from_secs(s.interval_sec);
         }
@@ -438,12 +527,22 @@ fn update_note(collector: tauri::State<'_, Mutex<collection::Collector>>, note: 
     collector.lock().unwrap().update_note(note);
 }
 
-/// 저장된 모든 이벤트를 최신순으로 반환한다 (right sidebar 초기 로드).
+/// 저장된 이벤트를 최신순으로 반환한다. limit이 있으면 페이지 단위로 반환한다.
 #[tauri::command]
 fn get_events(
     collector: tauri::State<'_, Mutex<collection::Collector>>,
+    limit: Option<i64>,
+    offset: Option<i64>,
 ) -> Vec<core_shared::Event> {
-    collector.lock().unwrap().all_events()
+    let collector = collector.lock().unwrap();
+    match limit {
+        Some(limit) => {
+            let limit = limit.clamp(1, 200);
+            let offset = offset.unwrap_or(0).max(0);
+            collector.events_page(limit, offset)
+        }
+        None => collector.all_events(),
+    }
 }
 
 #[tauri::command]
@@ -497,6 +596,27 @@ fn save_widgets(app: AppHandle, widgets: Vec<WidgetData>) -> Result<(), String> 
 #[tauri::command]
 fn get_note(app: AppHandle) -> Option<String> {
     note_path(&app).and_then(|p| std::fs::read_to_string(&p).ok())
+}
+
+fn read_report_notes(app: &AppHandle) -> HashMap<String, String> {
+    report_notes_path(app)
+        .and_then(|p| std::fs::read(&p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn get_report_note(app: AppHandle, date: String) -> String {
+    read_report_notes(&app).remove(&date).unwrap_or_default()
+}
+
+#[tauri::command]
+fn save_report_note(app: AppHandle, date: String, note: String) -> Result<(), String> {
+    let path = report_notes_path(&app).ok_or("app data dir 확보 실패")?;
+    let mut notes = read_report_notes(&app);
+    notes.insert(date, note);
+    let json = serde_json::to_string_pretty(&notes).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
 // 프런트(위젯 등)가 요청하는 시스템 알림을 띄운다 (타이머 완료 알람 등).
@@ -578,6 +698,8 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 setup_main_window_close_handler(app.handle());
+                #[cfg(target_os = "windows")]
+                setup_windows_custom_titlebar(app.handle());
                 if let Err(e) = build_tray(app.handle()) {
                     println!("[Rust] failed to build tray icon: {}", e);
                 }
@@ -682,6 +804,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_platform_info,
             open_checkin,
             update_checkin_context,
             get_checkin_data,
@@ -698,6 +821,8 @@ pub fn run() {
             get_widgets,
             save_widgets,
             get_note,
+            get_report_note,
+            save_report_note,
             notify
         ])
         .build(tauri::generate_context!())
