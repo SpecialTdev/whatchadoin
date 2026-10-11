@@ -44,7 +44,6 @@ function WorkView({
 
   const noteActive = focus === "note";
   const kanbanActive = focus === "kanban";
-  const kanbanMarkdown = kanbanActive ? draftNote : note;
 
   const clearFlushTimer = useCallback(() => {
     if (flushTimerRef.current == null) return;
@@ -240,7 +239,10 @@ function WorkView({
         ) : (
           <section className="workspace-pane kanban-pane">
             <KanbanBoard
-              markdown={kanbanMarkdown}
+              // Kanban commits directly to note. Feeding its edits back through
+              // the effect-synchronized textarea draft can replay stale markdown
+              // during rapid input and remount every card with new parsed IDs.
+              markdown={note}
               onChange={onNoteChange}
             />
           </section>
