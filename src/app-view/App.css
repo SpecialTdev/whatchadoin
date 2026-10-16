@@ -1459,22 +1459,24 @@ body.right-sidebar-resizing * {
 .gantt-row {
   display: grid;
   grid-template-columns: var(--gantt-label-w) 1fr;
-  align-items: center;
-  height: 34px;
+  align-items: stretch;
+  min-height: 34px;
 }
 
 .gantt-label {
   font-size: 0.82rem;
   color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding-right: 0.5rem;
+  align-self: center;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  padding: 0.4rem 0.5rem 0.4rem 0;
 }
 
 .gantt-track {
   position: relative;
-  height: 100%;
+  min-height: 34px;
   overflow: hidden;
   /* 세로 격자선은 .gantt-grid 요소로 시간축에 맞춰 직접 그린다 */
 }
@@ -1482,10 +1484,16 @@ body.right-sidebar-resizing * {
 /* 시간축 행 */
 .gantt-axis {
   height: 26px;
+  min-height: 26px;
   margin-bottom: 0.25rem;
 }
 
+.gantt-axis .gantt-label {
+  padding-block: 0;
+}
+
 .gantt-axis-track {
+  min-height: 0;
   background-image: none;
 }
 
@@ -1850,24 +1858,6 @@ body.right-sidebar-resizing * {
   margin-left: auto;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
-}
-
-.gantt-parent-title {
-  margin: 0;
-  padding: 0.55rem 0 0.15rem;
-  color: var(--text);
-  font-size: 0.8rem;
-  overflow-wrap: anywhere;
-}
-
-.gantt-task-group + .gantt-task-group {
-  border-top: 1px dashed var(--border);
-  margin-top: 0.3rem;
-}
-
-.gantt-subtask-row .gantt-label {
-  padding-left: 0.6rem;
-  color: var(--text-muted);
 }
 
 .checkin-task-btn {

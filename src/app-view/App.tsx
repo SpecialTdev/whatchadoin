@@ -844,7 +844,6 @@ function App() {
             date={selectedDate}
             events={reportDayEvents}
             checkinIntervalSec={intervalSec}
-            note={note}
           />
         ) : (
           <SettingsView

@@ -6,17 +6,25 @@ import {
 } from "../lib/checkinMemo";
 import { calendarDate, formatTime, type TrackedEvent } from "../lib/events";
 import { renderMarkdown } from "../lib/markdown";
-import { extractOpenTaskOptions } from "../lib/kanban";
-import { buildReportRows, groupReportRows, type Segment } from "../lib/reportTimeline";
 
 interface Props {
   date: string;
   events: TrackedEvent[]; // 선택한 업무일의 이벤트 (시간 오름차순)
   checkinIntervalSec: number; // 집중 구간 캡 추정에 사용 (체크인 주기)
-  note: string;
 }
 
 const HOUR = 3_600_000;
+
+// task별 막대 색상 팔레트 (등장 순서대로 배정).
+const TASK_PALETTE = [
+  "#4f8cff",
+  "#2ecc71",
+  "#e67e22",
+  "#9b59b6",
+  "#e74c3c",
+  "#1abc9c",
+  "#f1c40f",
+];
 
 // 노트 이벤트 종류별 색상 (활동 트랙 틱).
 function noteColor(text: string): string {
@@ -34,10 +42,50 @@ function fmtDuration(ms: number): string {
   return m === 0 ? `${h}시간` : `${h}시간 ${m}분`;
 }
 
+interface Segment {
+  start: number;
+  end: number;
+}
+interface Row {
+  task: string;
+  color: string;
+  segments: Segment[];
+}
 interface MemoPopup {
-  rowKey: string;
   task: string;
   time: number;
+}
+
+// 체크인들 → task별 집중 구간(Row). 각 체크인은 [ts, min(다음 체크인, ts+cap)) 동안
+// 해당 task에 집중한 것으로 보고, 같은 task가 맞닿으면 하나의 막대로 병합한다.
+// 체크인 간격이 cap을 넘으면 그 사이는 추적 공백(분절)으로 비워둔다.
+function buildRows(
+  checkins: { ts: number; task: string }[],
+  capMs: number,
+): Row[] {
+  const taskOrder: string[] = [];
+  const byTask = new Map<string, Segment[]>();
+
+  checkins.forEach((c, i) => {
+    const natural =
+      i + 1 < checkins.length ? checkins[i + 1].ts : c.ts + capMs;
+    const seg = { start: c.ts, end: Math.min(natural, c.ts + capMs) };
+
+    if (!byTask.has(c.task)) {
+      byTask.set(c.task, []);
+      taskOrder.push(c.task);
+    }
+    const arr = byTask.get(c.task)!;
+    const last = arr[arr.length - 1];
+    if (last && seg.start - last.end <= 1) last.end = seg.end; // 맞닿음 → 연장
+    else arr.push(seg);
+  });
+
+  return taskOrder.map((task, i) => ({
+    task,
+    color: TASK_PALETTE[i % TASK_PALETTE.length],
+    segments: byTask.get(task)!,
+  }));
 }
 
 function memoAtTime(
@@ -52,7 +100,7 @@ function memoAtTime(
   return selected;
 }
 
-function ReportView({ date, events, checkinIntervalSec, note }: Props) {
+function ReportView({ date, events, checkinIntervalSec }: Props) {
   const [memoPopup, setMemoPopup] = useState<MemoPopup | null>(null);
   const [reportNote, setReportNote] = useState("");
   const [reportNoteStatus, setReportNoteStatus] = useState<
@@ -62,7 +110,10 @@ function ReportView({ date, events, checkinIntervalSec, note }: Props) {
   const lastSavedReportNoteRef = useRef("");
   const memoPoints = useMemo(() => checkInMemoPoints(events), [events]);
   const noteEvents = useMemo(() => events.filter((e) => e.kind === "note"), [events]);
-  const taskOptions = useMemo(() => extractOpenTaskOptions(note, true), [note]);
+  const checkins = useMemo(
+    () => memoPoints.map((point) => ({ ts: point.ts, task: point.task })),
+    [memoPoints],
+  );
 
   useEffect(() => {
     setMemoPopup(null);
@@ -169,8 +220,7 @@ function ReportView({ date, events, checkinIntervalSec, note }: Props) {
 
   // 집중 구간 캡: 체크인 주기의 2배 (응답 누락/자리비움을 공백으로 끊기 위함).
   const capMs = Math.max(checkinIntervalSec * 1000 * 2, 5 * 60 * 1000);
-  const rows = buildReportRows(memoPoints, capMs, taskOptions);
-  const columnGroups = groupReportRows(rows);
+  const rows = buildRows(checkins, capMs);
 
   // 시간축 범위: 첫 이벤트 ~ (마지막 이벤트 / 구간 끝) 중 최대를 시간 경계로 반올림.
   const segEnds = rows.flatMap((r) => r.segments.map((s) => s.end));
@@ -199,7 +249,6 @@ function ReportView({ date, events, checkinIntervalSec, note }: Props) {
   const timeWithDay = (ts: number) =>
     `${formatTime(ts)}${crossesDay(ts) ? " (익일)" : ""}`;
   const openMemoPopup = (
-    rowKey: string,
     task: string,
     segment: Segment,
     event: MouseEvent<HTMLButtonElement>,
@@ -210,7 +259,6 @@ function ReportView({ date, events, checkinIntervalSec, note }: Props) {
         ? Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
         : 0;
     setMemoPopup({
-      rowKey,
       task,
       time: Math.round(segment.start + (segment.end - segment.start) * ratio),
     });
@@ -221,7 +269,7 @@ function ReportView({ date, events, checkinIntervalSec, note }: Props) {
       <span key={ts} className="gantt-grid" style={{ left: `${pct(ts)}%` }} />
     ));
   const selectedMemoPoint = memoPopup
-    ? memoAtTime(rows.find((row) => row.key === memoPopup.rowKey)?.points ?? [], memoPopup.task, memoPopup.time)
+    ? memoAtTime(memoPoints, memoPopup.task, memoPopup.time)
     : null;
 
   return (
@@ -254,44 +302,30 @@ function ReportView({ date, events, checkinIntervalSec, note }: Props) {
           </div>
 
           {/* task별 집중 구간 */}
-          {columnGroups.map((group) => (
-            <section className="gantt-column-group" key={group.key} aria-label={group.context.columnTitle || "기타 작업"}>
-              <h3 className="task-column-divider">
-                {group.context.rowTitle && <span>{group.context.rowTitle}</span>}
-                <strong>{group.context.columnTitle || "기타 작업"}</strong>
-                <span className="task-column-count">{group.parents.length}</span>
-              </h3>
-              {group.parents.map((parent) => (
-                <section className="gantt-task-group" key={parent.task} aria-label={parent.task}>
-                  <h4 className="gantt-parent-title">{parent.task}</h4>
-                  {parent.rows.map((row) => (
-                    <div key={row.key} className={`gantt-row${row.task !== parent.task ? " gantt-subtask-row" : ""}`}>
-                      <div className="gantt-label" title={row.task}>
-                        {row.task === parent.task ? "작업" : row.task.startsWith(`${parent.task} › `) ? row.task.slice(parent.task.length + 3) : row.task}
-                      </div>
-                      <div className="gantt-track">
-                        {renderGrid()}
-                        {row.segments.map((s, i) => (
-                          <button
-                            key={i}
-                            className="gantt-bar"
-                            type="button"
-                            style={{
-                              left: `${pct(s.start)}%`,
-                              width: `${Math.max(pct(s.end) - pct(s.start), 0.4)}%`,
-                              background: row.color,
-                            }}
-                            aria-label={`${row.task} 메모 보기 ${formatTime(s.start)}-${formatTime(s.end)}`}
-                            onClick={(event) => openMemoPopup(row.key, row.task, s, event)}
-                            title={`${row.task} ${formatTime(s.start)}–${formatTime(s.end)}`}
-                          />
-                        ))}
-                        </div>
-                      </div>
-                  ))}
-                </section>
-              ))}
-            </section>
+          {rows.map((row) => (
+            <div key={row.task} className="gantt-row">
+              <div className="gantt-label" title={row.task}>
+                {row.task}
+              </div>
+              <div className="gantt-track">
+                {renderGrid()}
+                {row.segments.map((s, i) => (
+                  <button
+                    key={i}
+                    className="gantt-bar"
+                    type="button"
+                    style={{
+                      left: `${pct(s.start)}%`,
+                      width: `${Math.max(pct(s.end) - pct(s.start), 0.4)}%`,
+                      background: row.color,
+                    }}
+                    aria-label={`${row.task} 메모 보기 ${formatTime(s.start)}-${formatTime(s.end)}`}
+                    onClick={(event) => openMemoPopup(row.task, s, event)}
+                    title={`${row.task} ${formatTime(s.start)}–${formatTime(s.end)}`}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
 
           {/* 노트 활동 (진행) */}
@@ -346,7 +380,7 @@ function ReportView({ date, events, checkinIntervalSec, note }: Props) {
           </div>
           <div className="insight-item">
             <span className="insight-label">체크인</span>
-            <span className="insight-value">{memoPoints.length}회</span>
+            <span className="insight-value">{checkins.length}회</span>
           </div>
           <div className="insight-item">
             <span className="insight-label">최장 공백</span>
