@@ -32,7 +32,7 @@ function WorkView({
   focusSignal,
   footerAction,
 }: Props) {
-  const [focus, setFocus] = useState<Focus>("note");
+  const [focus, setFocus] = useState<Focus>("kanban");
   const [draftNote, setDraftNote] = useState(note);
   const [pendingTask, setPendingTask] = useState<string | null>(null);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
@@ -134,6 +134,10 @@ function WorkView({
   }, [clearFlushTimer, onNoteChange]);
 
   // 외부 신호(체크인 '직접 입력')로 Note 활성화
+  useEffect(() => {
+    if (noteActive) textareaRef.current?.focus();
+  }, [noteActive]);
+
   useEffect(() => {
     if (focusSignal && focusSignal > 0) {
       setFocus("note");

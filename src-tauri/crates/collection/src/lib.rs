@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use core_shared::{Event, EventKind};
+use core_shared::{Event, EventKind, TaskContext};
 use rusqlite::{params, Connection};
 
 mod window;
@@ -64,6 +64,12 @@ impl Collector {
             )",
             [],
         )?;
+        if !table_columns(&conn, "events")?
+            .iter()
+            .any(|column| column.name == "task_context")
+        {
+            conn.execute("ALTER TABLE events ADD COLUMN task_context TEXT", [])?;
+        }
         Ok(Self {
             conn,
             latest: None,
@@ -113,12 +119,22 @@ impl Collector {
 
     /// 체크인 응답을 즉시 이벤트로 기록한다.
     pub fn record_checkin(&mut self, task: &str, memo: Option<&str>) -> Option<Event> {
+        self.record_checkin_with_context(task, memo, None)
+    }
+
+    pub fn record_checkin_with_context(
+        &mut self,
+        task: &str,
+        memo: Option<&str>,
+        context: Option<TaskContext>,
+    ) -> Option<Event> {
         let mut text = format!("체크인 — '{}' 작업 중", task);
         if let Some(memo) = memo.map(str::trim).filter(|m| !m.is_empty()) {
             text.push_str("\n\n");
             text.push_str(memo);
         }
-        self.insert(EventKind::Checkin, &text).ok()
+        self.insert_with_context(EventKind::Checkin, &text, context)
+            .ok()
     }
 
     /// 포커스된 최상위 윈도우(앱) 변화를 업무 이벤트로 기록한다.
@@ -128,10 +144,9 @@ impl Collector {
 
     /// 저장된 모든 이벤트를 최신순으로 반환한다 (right sidebar 초기 로드용).
     pub fn all_events(&self) -> Vec<Event> {
-        let mut stmt = match self
-            .conn
-            .prepare("SELECT id, ts, kind, text FROM events ORDER BY ts DESC, id DESC")
-        {
+        let mut stmt = match self.conn.prepare(
+            "SELECT id, ts, kind, text, task_context FROM events ORDER BY ts DESC, id DESC",
+        ) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
@@ -142,6 +157,9 @@ impl Collector {
                 ts: row.get(1)?,
                 kind: kind_from_str(&kind),
                 text: row.get(3)?,
+                task_context: row
+                    .get::<_, Option<String>>(4)?
+                    .and_then(|json| serde_json::from_str(&json).ok()),
             })
         });
         match rows {
@@ -153,7 +171,7 @@ impl Collector {
     /// 저장된 이벤트를 최신순으로 페이지 단위 반환한다 (right sidebar 무한스크롤용).
     pub fn events_page(&self, limit: i64, offset: i64) -> Vec<Event> {
         let mut stmt = match self.conn.prepare(
-            "SELECT id, ts, kind, text FROM events
+            "SELECT id, ts, kind, text, task_context FROM events
              ORDER BY ts DESC, id DESC
              LIMIT ?1 OFFSET ?2",
         ) {
@@ -167,6 +185,9 @@ impl Collector {
                 ts: row.get(1)?,
                 kind: kind_from_str(&kind),
                 text: row.get(3)?,
+                task_context: row
+                    .get::<_, Option<String>>(4)?
+                    .and_then(|json| serde_json::from_str(&json).ok()),
             })
         });
         match rows {
@@ -177,8 +198,15 @@ impl Collector {
 
     /// 열린 DB에서 일관된 SQLite 스냅샷 파일을 만든 뒤, 요청 단계에 따라
     /// 내보낸 파일에만 비식별화를 적용한다.
-    pub fn export_to(&self, dest: &Path, privacy_level: ExportPrivacyLevel) -> rusqlite::Result<()> {
-        let sql = format!("VACUUM INTO {}", sql_string_literal(&dest.to_string_lossy()));
+    pub fn export_to(
+        &self,
+        dest: &Path,
+        privacy_level: ExportPrivacyLevel,
+    ) -> rusqlite::Result<()> {
+        let sql = format!(
+            "VACUUM INTO {}",
+            sql_string_literal(&dest.to_string_lossy())
+        );
         self.conn.execute_batch(&sql)?;
 
         if privacy_level > ExportPrivacyLevel::RawData {
@@ -189,16 +217,31 @@ impl Collector {
     }
 
     fn insert(&self, kind: EventKind, text: &str) -> rusqlite::Result<Event> {
+        self.insert_with_context(kind, text, None)
+    }
+
+    fn insert_with_context(
+        &self,
+        kind: EventKind,
+        text: &str,
+        context: Option<TaskContext>,
+    ) -> rusqlite::Result<Event> {
         let ts = now_millis();
+        let context_json = context
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         self.conn.execute(
-            "INSERT INTO events (ts, kind, text) VALUES (?1, ?2, ?3)",
-            params![ts, kind_to_str(kind), text],
+            "INSERT INTO events (ts, kind, text, task_context) VALUES (?1, ?2, ?3, ?4)",
+            params![ts, kind_to_str(kind), text, context_json],
         )?;
         Ok(Event {
             id: self.conn.last_insert_rowid(),
             ts,
             kind,
             text: text.to_string(),
+            task_context: context,
         })
     }
 }
@@ -260,8 +303,25 @@ fn apply_export_privacy(
     }
 
     if privacy_level >= ExportPrivacyLevel::TaskNamesObfuscated {
+        // Column and parent names are identifying too. Do not retain their
+        // snapshot in an export whose task names have been obfuscated.
+        for table in &tables {
+            if table == "events"
+                && table_columns(conn, table)?
+                    .iter()
+                    .any(|column| column.name == "task_context")
+            {
+                conn.execute("UPDATE events SET task_context = NULL", [])?;
+            }
+        }
         let mut task_aliases = HashMap::new();
-        redact_named_columns(conn, &tables, is_task_name_column, "task", &mut task_aliases)?;
+        redact_named_columns(
+            conn,
+            &tables,
+            is_task_name_column,
+            "task",
+            &mut task_aliases,
+        )?;
         obfuscate_task_references_in_event_texts(conn, &tables, &mut task_aliases)?;
     }
     Ok(())
@@ -345,7 +405,9 @@ fn redact_window_references_in_event_texts(
             continue;
         }
         let columns = table_columns(conn, table)?;
-        let has_kind = columns.iter().any(|col| normalized_identifier(&col.name) == "kind");
+        let has_kind = columns
+            .iter()
+            .any(|col| normalized_identifier(&col.name) == "kind");
         let text_col = columns.iter().find(|col| {
             is_text_column(&col.data_type) && normalized_identifier(&col.name) == "text"
         });
@@ -466,15 +528,16 @@ fn redact_process_window_text(text: &str, window_aliases: &mut HashMap<String, S
     text.to_string()
 }
 
-fn redact_process_group_text(
-    group: &str,
-    window_aliases: &mut HashMap<String, String>,
-) -> String {
+fn redact_process_group_text(group: &str, window_aliases: &mut HashMap<String, String>) -> String {
     let (name, suffix) = split_process_group_suffix(group);
     if name.trim().is_empty() {
         return group.to_string();
     }
-    format!("{}{}", alias_for(window_aliases, name.trim(), "window"), suffix)
+    format!(
+        "{}{}",
+        alias_for(window_aliases, name.trim(), "window"),
+        suffix
+    )
 }
 
 fn split_process_group_suffix(group: &str) -> (&str, &str) {
@@ -520,15 +583,13 @@ fn normalized_identifier(name: &str) -> String {
 }
 
 fn obfuscate_task_event_text(text: &str, task_aliases: &mut HashMap<String, String>) -> String {
-    const TASK_EVENT_PREFIXES: [&str; 5] = [
-        "체크인",
-        "할 일 추가",
-        "할 일 삭제",
-        "완료 취소",
-        "완료",
-    ];
+    const TASK_EVENT_PREFIXES: [&str; 5] =
+        ["체크인", "할 일 추가", "할 일 삭제", "완료 취소", "완료"];
 
-    if !TASK_EVENT_PREFIXES.iter().any(|prefix| text.starts_with(prefix)) {
+    if !TASK_EVENT_PREFIXES
+        .iter()
+        .any(|prefix| text.starts_with(prefix))
+    {
         return text.to_string();
     }
 
@@ -752,6 +813,62 @@ mod tests {
     }
 
     #[test]
+    fn legacy_database_migrates_and_context_survives_reopening_and_pagination() {
+        let (db_path, _) = temp_db_paths("task-context-migration");
+        let _ = std::fs::remove_file(&db_path);
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL);
+            INSERT INTO events (ts, kind, text) VALUES (1, 'checkin', 'legacy');").unwrap();
+        drop(conn);
+        let context = TaskContext {
+            row_title: Some("Product".into()),
+            column_title: Some("Doing".into()),
+            parent_task: Some("Alpha".into()),
+        };
+        let mut collector = Collector::open(&db_path).unwrap();
+        assert!(collector.all_events()[0].task_context.is_none());
+        let event = collector
+            .record_checkin_with_context("Alpha › Child", Some("memo"), Some(context.clone()))
+            .unwrap();
+        assert_eq!(event.task_context, Some(context.clone()));
+        drop(collector);
+        let reopened = Collector::open(&db_path).unwrap();
+        assert_eq!(reopened.all_events().len(), 2);
+        assert_eq!(reopened.events_page(1, 0)[0].task_context, Some(context));
+        assert!(reopened.events_page(1, 1)[0].task_context.is_none());
+        drop(reopened);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn task_obfuscated_exports_remove_context_without_changing_source() {
+        let (db_path, export_path) = temp_db_paths("task-context-privacy");
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(&export_path);
+        let mut collector = Collector::open(&db_path).unwrap();
+        collector.record_checkin_with_context(
+            "Secret task",
+            None,
+            Some(TaskContext {
+                row_title: Some("Secret project".into()),
+                column_title: Some("Private column".into()),
+                parent_task: None,
+            }),
+        );
+        collector
+            .export_to(&export_path, ExportPrivacyLevel::TaskNamesObfuscated)
+            .unwrap();
+        let exported = Collector::open(&export_path).unwrap();
+        assert!(exported.all_events()[0].task_context.is_none());
+        assert!(collector.all_events()[0].task_context.is_some());
+        assert!(!exported.all_events()[0].text.contains("Secret task"));
+        drop(exported);
+        drop(collector);
+        let _ = std::fs::remove_file(db_path);
+        let _ = std::fs::remove_file(export_path);
+    }
+
+    #[test]
     fn events_page_returns_latest_slice() {
         let (db_path, _) = temp_db_paths("events-page");
         let _ = std::fs::remove_file(&db_path);
@@ -764,7 +881,9 @@ mod tests {
         let page = collector.events_page(2, 1);
         assert_eq!(page.len(), 2);
         assert_eq!(
-            page.iter().map(|event| event.text.as_str()).collect::<Vec<_>>(),
+            page.iter()
+                .map(|event| event.text.as_str())
+                .collect::<Vec<_>>(),
             vec!["second", "first"]
         );
 
@@ -890,15 +1009,17 @@ mod tests {
 
         let conn = Connection::open(&export_path).unwrap();
         let window_name: String = conn
-            .query_row("SELECT window_name FROM foreground_events", [], |row| row.get(0))
+            .query_row("SELECT window_name FROM foreground_events", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         let task_name: String = conn
-            .query_row("SELECT task_name FROM foreground_events", [], |row| row.get(0))
+            .query_row("SELECT task_name FROM foreground_events", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         let event_texts: Vec<String> = {
-            let mut stmt = conn
-                .prepare("SELECT text FROM events ORDER BY id")
-                .unwrap();
+            let mut stmt = conn.prepare("SELECT text FROM events ORDER BY id").unwrap();
             stmt.query_map([], |row| row.get(0))
                 .unwrap()
                 .collect::<Result<_, _>>()
@@ -909,10 +1030,7 @@ mod tests {
         assert_eq!(task_name, "task-001");
         assert_eq!(
             event_texts,
-            vec![
-                "체크인 — 'task-001' 작업 중",
-                "할 일 추가 — 'task-001'"
-            ]
+            vec!["체크인 — 'task-001' 작업 중", "할 일 추가 — 'task-001'"]
         );
 
         drop(conn);

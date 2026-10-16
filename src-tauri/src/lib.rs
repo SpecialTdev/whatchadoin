@@ -66,6 +66,10 @@ struct CheckInTaskOption {
     value: String,
     #[serde(default, rename = "parentValue")]
     parent_value: Option<String>,
+    #[serde(default, rename = "rowTitle")]
+    row_title: Option<String>,
+    #[serde(default, rename = "columnTitle")]
+    column_title: Option<String>,
 }
 
 impl<'de> serde::Deserialize<'de> for CheckInTaskKind {
@@ -77,7 +81,10 @@ impl<'de> serde::Deserialize<'de> for CheckInTaskKind {
         match value.as_str() {
             "parent" => Ok(Self::Parent),
             "subitem" => Ok(Self::Subitem),
-            other => Err(serde::de::Error::unknown_variant(other, &["parent", "subitem"])),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["parent", "subitem"],
+            )),
         }
     }
 }
@@ -90,6 +97,8 @@ fn parent_task_options(tasks: &[String]) -> Vec<CheckInTaskOption> {
             label: task.clone(),
             value: task.clone(),
             parent_value: None,
+            row_title: None,
+            column_title: None,
         })
         .collect()
 }
@@ -474,7 +483,7 @@ fn submit_checkin(
 ) {
     let memo = memo.unwrap_or_default();
     println!("[Rust] submit_checkin called, task: {}", task);
-    let status = {
+    let (status, task_context) = {
         let mut s = state.lock().unwrap();
         s.active_task = Some(task.clone());
         if !s.tasks.iter().any(|t| t == &task) {
@@ -486,12 +495,29 @@ fn submit_checkin(
                 label: task.clone(),
                 value: task.clone(),
                 parent_value: None,
+                row_title: None,
+                column_title: None,
             });
         }
         if s.mode == CheckInMode::Working {
             s.next_checkin_at = Instant::now() + Duration::from_secs(s.interval_sec);
         }
-        checkin_status(&s)
+        let context = s
+            .task_options
+            .iter()
+            .find(|option| option.value == task)
+            .filter(|option| option.column_title.is_some())
+            .map(|option| core_shared::TaskContext {
+                row_title: option.row_title.clone(),
+                column_title: option.column_title.clone(),
+                parent_task: Some(
+                    option
+                        .parent_value
+                        .clone()
+                        .unwrap_or_else(|| option.value.clone()),
+                ),
+            });
+        (checkin_status(&s), context)
     };
 
     let result = app.emit_to(
@@ -508,7 +534,11 @@ fn submit_checkin(
     emit_checkin_status(&app, status);
 
     // 체크인 응답을 이벤트로 기록하고 right sidebar에 즉시 반영한다.
-    let event = collector.lock().unwrap().record_checkin(&task, Some(&memo));
+    let event =
+        collector
+            .lock()
+            .unwrap()
+            .record_checkin_with_context(&task, Some(&memo), task_context);
     if let Some(ev) = event {
         let _ = app.emit_to(
             EventTarget::WebviewWindow {

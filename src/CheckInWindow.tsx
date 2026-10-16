@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { CheckInStatus, CheckInTaskOption } from "./lib/checkin";
+import { groupTaskOptions } from "./lib/checkin";
 import { latestMemoByTask } from "./lib/checkinMemo";
 import { fetchEvents } from "./lib/events";
 import { renderMarkdown } from "./lib/markdown";
@@ -323,7 +324,7 @@ function CheckInWindow() {
 
   const submitDisabled = showNewTaskInput ? !newTask.trim() : !selected;
   const taskOptions = getTaskOptions(data);
-  const parentTaskOptions = taskOptions.filter((option) => option.kind === "parent");
+  const taskGroups = groupTaskOptions(taskOptions);
   const subtaskOptions = taskOptions.filter((option) => option.kind === "subitem");
   const subtasksByParent = new Map<string, CheckInTaskOption[]>();
   for (const option of subtaskOptions) {
@@ -348,40 +349,49 @@ function CheckInWindow() {
 
       {!showNewTaskInput ? (
         <div className="checkin-task-list">
-          {parentTaskOptions.map((option) => {
-            const childOptions = subtasksByParent.get(option.value) ?? [];
-            const isExpanded = expandedTask === option.value;
-            return (
-              <div className="checkin-task-group" key={option.value}>
-                <button
-                  className={`checkin-task-btn${
-                    selected === option.value ? " selected" : ""
-                  }${childOptions.length > 0 ? " has-subtasks" : ""}`}
-                  onClick={() => selectParentTask(option.value, childOptions.length > 0)}
-                  aria-expanded={childOptions.length > 0 ? isExpanded : undefined}
-                >
-                  <span>{option.label}</span>
-                  {childOptions.length > 0 && (
-                    <span className="checkin-subtask-count">{childOptions.length}</span>
-                  )}
-                </button>
-                {isExpanded &&
-                  childOptions.map((child) => (
-                  <button
-                    key={child.value}
-                    className={`checkin-task-btn subtask${
-                      selected === child.value ? " selected" : ""
-                    }`}
-                    onClick={() => selectSubtask(child.value, option.value)}
-                    title={child.value}
-                  >
-                    <span className="checkin-task-kind">하위</span>
-                    <span className="checkin-task-label">{child.label}</span>
-                  </button>
-                ))}
-              </div>
-            );
-          })}
+          {taskGroups.map((group) => (
+            <section className="checkin-column-group" key={group.key} aria-label={group.columnTitle || "기타 작업"}>
+              <h2 className="task-column-divider">
+                {group.rowTitle && <span>{group.rowTitle}</span>}
+                <strong>{group.columnTitle || "기타 작업"}</strong>
+                <span className="task-column-count">{group.tasks.length}</span>
+              </h2>
+              {group.tasks.map((option) => {
+                const childOptions = subtasksByParent.get(option.value) ?? [];
+                const isExpanded = expandedTask === option.value;
+                return (
+                  <div className="checkin-task-group" key={option.value}>
+                    <button
+                      className={`checkin-task-btn${
+                        selected === option.value ? " selected" : ""
+                      }${childOptions.length > 0 ? " has-subtasks" : ""}`}
+                      onClick={() => selectParentTask(option.value, childOptions.length > 0)}
+                      aria-expanded={childOptions.length > 0 ? isExpanded : undefined}
+                    >
+                      <span>{option.label}</span>
+                      {childOptions.length > 0 && (
+                        <span className="checkin-subtask-count">{childOptions.length}</span>
+                      )}
+                    </button>
+                    {isExpanded &&
+                      childOptions.map((child) => (
+                        <button
+                          key={child.value}
+                          className={`checkin-task-btn subtask${
+                            selected === child.value ? " selected" : ""
+                          }`}
+                          onClick={() => selectSubtask(child.value, option.value)}
+                          title={child.value}
+                        >
+                          <span className="checkin-task-kind">하위</span>
+                          <span className="checkin-task-label">{child.label}</span>
+                        </button>
+                    ))}
+                  </div>
+                );
+              })}
+            </section>
+          ))}
         </div>
       ) : (
         <input

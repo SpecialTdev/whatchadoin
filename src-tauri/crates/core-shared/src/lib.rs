@@ -24,6 +24,18 @@ pub enum EventKind {
     Window,
 }
 
+/// 체크인 당시의 컬럼과 상위 작업. 카드 이동 후에도 과거 분류를 보존한다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub row_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_task: Option<String>,
+}
+
 /// 백그라운드 추적이 기록하는 단일 업무 이벤트.
 ///
 /// `collection` 크레이트가 생성·영속하고, UI(right sidebar)가 표출한다.
@@ -37,6 +49,8 @@ pub struct Event {
     pub kind: EventKind,
     /// 사람이 읽는 요약 문구 (예: "할 일 추가 — '리포트 정리'")
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_context: Option<TaskContext>,
 }
 
 /// 처리 엔진이 외부(app-service)에 노출하는 인터페이스.
