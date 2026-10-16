@@ -9,6 +9,7 @@ active-win-pos-rs = "0.11.0"
 core-shared = { path = "../core-shared" }
 # 번들 SQLite — 이벤트 영속 저장 (C 컴파일러로 sqlite3를 빌드한다)
 rusqlite = { version = "0.31", features = ["bundled"] }
+serde_json = { workspace = true }
 
 # macOS: 포커스 폴링이 NSWorkspace의 autorelease 객체를 새지 않도록 풀로 감싼다.
 [target.'cfg(target_os = "macos")'.dependencies]

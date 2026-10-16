@@ -40,24 +40,27 @@ function collectSubitemOptions(
   parentPath: string[],
   out: CheckInTaskOption[],
   seen: Set<string>,
+  context: Pick<CheckInTaskOption, "rowTitle" | "columnTitle">,
+  includeCompleted: boolean,
 ) {
   for (const item of items) {
     const label = item.text.trim();
     const path = label ? [...parentPath, label] : parentPath;
-    if (!item.done && label) {
+    if ((includeCompleted || !item.done) && label) {
       pushTaskOption(out, seen, {
         kind: "subitem",
         label,
         parentValue: parentPath[0],
         value: path.join(TASK_PATH_SEPARATOR),
+        ...context,
       });
-      collectSubitemOptions(item.children, path, out, seen);
+      collectSubitemOptions(item.children, path, out, seen, context, includeCompleted);
     }
   }
 }
 
 // 체크인 전용 후보: parent task와 사용자가 펼쳐 볼 subitem 후보를 함께 만든다.
-export function extractOpenTaskOptions(note: string): CheckInTaskOption[] {
+export function extractOpenTaskOptions(note: string, includeCompleted = false): CheckInTaskOption[] {
   const seen = new Set<string>();
   const out: CheckInTaskOption[] = [];
   const board = parseMarkdown(note);
@@ -66,9 +69,10 @@ export function extractOpenTaskOptions(note: string): CheckInTaskOption[] {
     for (const col of row.columns) {
       for (const card of col.cards) {
         const task = card.text.trim();
-        if (card.done || !task) continue;
-        pushTaskOption(out, seen, { kind: "parent", label: task, value: task });
-        collectSubitemOptions(card.children, [task], out, seen);
+        if ((!includeCompleted && card.done) || !task) continue;
+        const context = { rowTitle: row.title, columnTitle: col.title };
+        pushTaskOption(out, seen, { kind: "parent", label: task, value: task, ...context });
+        collectSubitemOptions(card.children, [task], out, seen, context, includeCompleted);
       }
     }
   }

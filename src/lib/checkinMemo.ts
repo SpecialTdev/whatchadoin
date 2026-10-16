@@ -1,4 +1,5 @@
 import type { TrackedEvent } from "./events";
+import type { TaskContext } from "./checkin";
 
 export interface ParsedCheckInMemo {
   task: string;
@@ -8,6 +9,7 @@ export interface ParsedCheckInMemo {
 export interface CheckInMemoPoint extends ParsedCheckInMemo {
   id: number;
   ts: number;
+  taskContext?: TaskContext;
 }
 
 export function parseCheckInMemo(text: string): ParsedCheckInMemo | null {
@@ -26,7 +28,7 @@ export function parseCheckInMemo(text: string): ParsedCheckInMemo | null {
 export function checkInMemoPoints(events: TrackedEvent[]): CheckInMemoPoint[] {
   return events
     .filter((event) => event.kind === "checkin")
-    .map((event) => {
+    .map((event): CheckInMemoPoint | null => {
       const parsed = parseCheckInMemo(event.text);
       return parsed
         ? {
@@ -34,6 +36,7 @@ export function checkInMemoPoints(events: TrackedEvent[]): CheckInMemoPoint[] {
             ts: event.ts,
             task: parsed.task,
             memo: parsed.memo,
+            taskContext: event.taskContext,
           }
         : null;
     })

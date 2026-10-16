@@ -20,6 +20,7 @@ let root: Root;
 
 function Harness() {
   const [note, setNote] = useState(NOTE);
+  const [focusSignal, setFocusSignal] = useState(0);
   return (
     <>
       <WorkView
@@ -28,8 +29,10 @@ function Harness() {
         tasks={extractOpenTasks(note)}
         taskOptions={extractOpenTaskOptions(note)}
         activeTask={null}
+        focusSignal={focusSignal}
       />
       <output>{note}</output>
+      <button onClick={() => setFocusSignal((value) => value + 1)}>Direct input</button>
       <button onClick={() => setNote(NOTE.replace("Alpha", "External task"))}>
         Replace note
       </button>
@@ -61,7 +64,6 @@ beforeEach(async () => {
   document.body.append(container);
   root = createRoot(container);
   await act(async () => root.render(<StrictMode><Harness /></StrictMode>));
-  await act(async () => buttonNamed("Kanban").click());
 });
 
 afterEach(async () => {
@@ -70,6 +72,16 @@ afterEach(async () => {
 });
 
 describe("Kanban editing in WorkView", () => {
+  it("opens Kanban by default and focuses Note for direct input", async () => {
+    expect(container.querySelector(".kanban-wrap")).not.toBeNull();
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(buttonNamed("Kanban").className).toBe("active");
+    await act(async () => buttonNamed("Direct input").click());
+    expect(document.activeElement).toBe(container.querySelector("textarea"));
+    container.querySelector("textarea")!.blur();
+    await act(async () => buttonNamed("Direct input").click());
+    expect(document.activeElement).toBe(container.querySelector("textarea"));
+  });
   it.each([
     ".kanban-card-text",
     ".kanban-subitem-text",

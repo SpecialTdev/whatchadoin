@@ -1,6 +1,7 @@
 // 업무 이벤트 공유 타입·유틸.
 // Rust collection crate가 생성·영속하는 Event를 프런트(RightSidebar, ReportView)에서
 // 공통으로 다룬다.
+import type { TaskContext } from "./checkin";
 
 export type EventKind = "note" | "checkin" | "process" | "window";
 
@@ -9,6 +10,7 @@ export interface TrackedEvent {
   ts: number; // unix epoch millis
   kind: EventKind;
   text: string;
+  taskContext?: TaskContext;
 }
 
 export interface EventsPageRequest {

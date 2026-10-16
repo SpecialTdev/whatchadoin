@@ -52,7 +52,7 @@ describe("kanban markdown domain", () => {
 `;
 
     expect(extractOpenTasks(note)).toEqual(["Alpha", "Beta", "Gamma"]);
-    expect(extractOpenTaskOptions(note)).toEqual([
+    expect(extractOpenTaskOptions(note)).toMatchObject([
       { kind: "parent", label: "Alpha", value: "Alpha" },
       {
         kind: "subitem",
@@ -94,7 +94,7 @@ describe("kanban markdown domain", () => {
   - [ ] Open child
 `;
 
-    expect(extractOpenTaskOptions(note)).toEqual([
+    expect(extractOpenTaskOptions(note)).toMatchObject([
       { kind: "parent", label: "Visible", value: "Visible" },
       {
         kind: "subitem",
