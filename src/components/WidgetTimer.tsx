@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useCountdown } from "../lib/useCountdown";
 import { notifyAlarm } from "../lib/notify";
 
 interface Props {
@@ -29,25 +30,15 @@ function clampInt(v: number, min: number, max: number): number {
 // 단순 카운트다운 타이머. 실행 상태는 휘발(컴포넌트 로컬), 길이만 영속한다.
 function WidgetTimer({ initialDurationSec, onDurationChange }: Props) {
   const [durationSec, setDurationSec] = useState(initialDurationSec);
-  const [remaining, setRemaining] = useState(initialDurationSec);
-  const [running, setRunning] = useState(false);
-
-  // 실행 중이면 1초마다 카운트다운.
-  useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => {
-      setRemaining((r) => Math.max(0, r - 1));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [running]);
+  const { remaining, running, toggle, reset: resetCountdown } = useCountdown(initialDurationSec);
 
   // 0에 도달하면 정지하고 완료 알람을 띄운다 (카운트다운 종료 시 1회).
   useEffect(() => {
     if (running && remaining === 0) {
-      setRunning(false);
+      resetCountdown(0);
       notifyAlarm("타이머 완료", "설정한 시간이 끝났어요.");
     }
-  }, [running, remaining]);
+  }, [running, remaining, resetCountdown]);
 
   // idle = 정지 + 처음 상태(남은 시간 = 설정 길이). 이때만 시간 입력을 노출.
   const idle = !running && remaining === durationSec;
@@ -59,7 +50,7 @@ function WidgetTimer({ initialDurationSec, onDurationChange }: Props) {
   function applyDuration(next: number) {
     const sec = clampInt(next, 0, MAX_SEC);
     setDurationSec(sec);
-    setRemaining(sec);
+    resetCountdown(sec);
     onDurationChange(sec); // 최근 사용 시간으로 영속
   }
 
@@ -74,15 +65,6 @@ function WidgetTimer({ initialDurationSec, onDurationChange }: Props) {
     applyDuration(next);
   }
 
-  function toggle() {
-    if (running) setRunning(false);
-    else if (remaining > 0) setRunning(true);
-  }
-
-  function reset() {
-    setRunning(false);
-    setRemaining(durationSec);
-  }
 
   const progress = durationSec > 0 ? (remaining / durationSec) * 100 : 0;
 
@@ -138,7 +120,7 @@ function WidgetTimer({ initialDurationSec, onDurationChange }: Props) {
         >
           {running ? "일시정지" : "시작"}
         </button>
-        <button className="widget-timer-btn" onClick={reset} disabled={idle}>
+        <button className="widget-timer-btn" onClick={() => resetCountdown(durationSec)} disabled={idle}>
           리셋
         </button>
       </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { WidgetConfig } from "../lib/widgets";
+import { useCountdown } from "../lib/useCountdown";
 import { notifyAlarm } from "../lib/notify";
 
 interface Props {
@@ -37,17 +38,9 @@ function WidgetPomodoro({
   const [focusSec, setFocusSec] = useState(initialFocusSec);
   const [breakSec, setBreakSec] = useState(initialBreakSec);
   const [mode, setMode] = useState<Mode>("work");
-  const [remaining, setRemaining] = useState(initialFocusSec);
-  const [running, setRunning] = useState(false);
+  const { remaining, running, toggle, reset: resetCountdown } = useCountdown(initialFocusSec);
 
   const duration = mode === "work" ? focusSec : breakSec;
-
-  // 실행 중이면 1초마다 카운트다운.
-  useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => setRemaining((r) => Math.max(0, r - 1)), 1000);
-    return () => clearInterval(id);
-  }, [running]);
 
   // 0 도달: 알람을 띄우고 반대 모드로 전환해 자동으로 이어서 시작.
   useEffect(() => {
@@ -59,9 +52,8 @@ function WidgetPomodoro({
       next === "break" ? "휴식 시간이에요 ☕" : "다시 집중할 시간! 💪",
     );
     setMode(next);
-    setRemaining(nextDur);
-    if (nextDur === 0) setRunning(false); // 길이 0이면 무한 전환 방지
-  }, [running, remaining, mode, focusSec, breakSec]);
+    resetCountdown(nextDur, true);
+  }, [running, remaining, mode, focusSec, breakSec, resetCountdown]);
 
   const idle = !running && remaining === duration;
   const m = Math.floor(duration / 60);
@@ -75,7 +67,7 @@ function WidgetPomodoro({
       setBreakSec(sec);
       onConfigChange({ breakSec: sec });
     }
-    setRemaining(sec);
+    resetCountdown(sec);
   }
 
   function setPart(part: "m" | "s", raw: string) {
@@ -86,19 +78,9 @@ function WidgetPomodoro({
   function switchMode(next: Mode) {
     if (next === mode) return;
     setMode(next);
-    setRunning(false);
-    setRemaining(next === "work" ? focusSec : breakSec);
+    resetCountdown(next === "work" ? focusSec : breakSec);
   }
 
-  function toggle() {
-    if (running) setRunning(false);
-    else if (remaining > 0) setRunning(true);
-  }
-
-  function reset() {
-    setRunning(false);
-    setRemaining(duration);
-  }
 
   // 남은 시간 비율만큼 채운 원형 인디케이터. 시간이 흐르면 채움이 반시계방향으로 줄어든다.
   const angle = duration > 0 ? (remaining / duration) * 360 : 0;
@@ -159,7 +141,7 @@ function WidgetPomodoro({
         >
           {running ? "일시정지" : "시작"}
         </button>
-        <button className="ppomo-btn" onClick={reset} disabled={idle}>
+        <button className="ppomo-btn" onClick={() => resetCountdown(duration)} disabled={idle}>
           리셋
         </button>
       </div>
