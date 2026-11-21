@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { POSTURE_INTERVAL_OPTIONS_MIN } from "../lib/widgets";
 import { notifyAlarm } from "../lib/notify";
+import { useCountdown } from "../lib/useCountdown";
 import thumbnail from "../assets/posture-check-thumbnail.png";
 
 interface Props {
@@ -30,23 +31,15 @@ function nearestIndex(min: number): number {
 // 실행 상태는 휘발(컴포넌트 로컬), 간격만 영속한다.
 function WidgetPostureCheck({ initialIntervalSec, onIntervalChange }: Props) {
   const [intervalSec, setIntervalSec] = useState(initialIntervalSec);
-  const [elapsed, setElapsed] = useState(0);
-  const [running, setRunning] = useState(false);
+  const { remaining, running, toggle, reset } = useCountdown(initialIntervalSec);
+  const elapsed = intervalSec - remaining;
 
-  // 실행 중이면 1초마다 경과 증가.
   useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
-    return () => clearInterval(id);
-  }, [running]);
-
-  // 간격에 도달하면 알림을 띄우고 다음 주기로 반복(설정 시간마다).
-  useEffect(() => {
-    if (running && elapsed >= intervalSec) {
+    if (running && remaining === 0) {
       notifyAlarm("척추요정", "허리 펴고 스트레칭 할 시간이에요! 🦴");
-      setElapsed(0);
+      reset(intervalSec, true);
     }
-  }, [running, elapsed, intervalSec]);
+  }, [running, remaining, intervalSec, reset]);
 
   const index = nearestIndex(Math.round(intervalSec / 60));
   const minutes = OPTIONS[index];
@@ -55,7 +48,7 @@ function WidgetPostureCheck({ initialIntervalSec, onIntervalChange }: Props) {
     const sec = OPTIONS[i] * 60;
     setIntervalSec(sec);
     // 간격 변경 시 현재 진행시간은 유지하되, 진행 > 새 간격이면 리셋.
-    setElapsed((e) => (e > sec ? 0 : e));
+    reset(elapsed >= sec ? sec : sec - elapsed, running);
     onIntervalChange(sec);
   }
 
@@ -84,7 +77,7 @@ function WidgetPostureCheck({ initialIntervalSec, onIntervalChange }: Props) {
           <div className="posture-bar" style={{ width: `${progress}%` }} />
         </div>
 
-        <button className="posture-btn" onClick={() => setRunning((r) => !r)}>
+        <button className="posture-btn" onClick={toggle}>
           {running ? "일시정지" : "시작"}
         </button>
       </div>
