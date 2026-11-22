@@ -13,7 +13,7 @@ html,
   background: var(--surface);
   height: 100vh;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .checkin-loading {
@@ -21,4 +21,31 @@ html,
   color: var(--text-muted);
   background: var(--surface);
   min-height: 100vh;
+}
+
+/* Measure the natural list height before clamping the native window. */
+.checkin-window[data-fitting] {
+  height: auto;
+}
+
+.checkin-window[data-fitting] .checkin-task-list {
+  flex: none;
+}
+
+.checkin-window[data-fitting] .checkin-memo-section {
+  transition: none;
+}
+
+.checkin-window[data-fitting] .checkin-memo-section:not(.collapsed) {
+  flex: none;
+  grid-template-rows: auto 220px;
+}
+
+
+.checkin-window .checkin-task-list {
+  min-height: 4rem;
+}
+
+.checkin-window .checkin-memo-section:not(.collapsed) {
+  min-height: 7rem;
 }

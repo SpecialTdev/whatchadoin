@@ -27,7 +27,7 @@ beforeEach(() => {
     calls.push({ cmd, args });
     if (cmd === "get_checkin_data") return {
       tasks: extractOpenTasks(NOTE), task_options: extractOpenTaskOptions(NOTE),
-      active_task: "Alpha", mode: "working",
+      active_task: null, mode: "working",
     };
     if (cmd === "get_events") return [];
     if (cmd === "get_report_note") return "";

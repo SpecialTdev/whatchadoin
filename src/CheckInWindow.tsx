@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { LogicalSize } from "@tauri-apps/api/dpi";
+import { useCheckInWindowSize } from "./lib/useCheckInWindowSize";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { CheckInStatus, CheckInTaskOption } from "./lib/checkin";
 import { groupTaskOptions } from "./lib/checkin";
@@ -16,8 +16,6 @@ interface CheckInData extends CheckInStatus {
 }
 
 const MEMO_COLLAPSED_STORAGE_KEY = "checkin:memo-collapsed";
-const CHECKIN_MEMO_HEIGHT_DELTA = 220;
-const CHECKIN_MIN_HEIGHT = 320;
 
 function CheckInWindow() {
   const [data, setData] = useState<CheckInData | null>(null);
@@ -35,7 +33,7 @@ function CheckInWindow() {
       return false;
     }
   });
-  const initialCollapsedResizeAppliedRef = useRef(false);
+  const windowRef = useCheckInWindowSize(data, memoCollapsed, showNewTaskInput, expandedTask);
   const taskOptionsRef = useRef<CheckInTaskOption[]>([]);
 
   function fillMemoForTask(task: string, memos = memoByTask) {
@@ -74,23 +72,6 @@ function CheckInWindow() {
     setMemoDirty(true);
   }
 
-  async function offsetCheckInWindowHeight(delta: number) {
-    const win = getCurrentWindow();
-    const [innerSize, scaleFactor] = await Promise.all([win.innerSize(), win.scaleFactor()]);
-    const logicalSize = innerSize.toLogical(scaleFactor);
-    await win.setSize(
-      new LogicalSize(logicalSize.width, Math.max(CHECKIN_MIN_HEIGHT, logicalSize.height + delta)),
-    );
-  }
-
-  async function resizeMemoWindow(collapsed: boolean) {
-    try {
-      await offsetCheckInWindowHeight(collapsed ? -CHECKIN_MEMO_HEIGHT_DELTA : CHECKIN_MEMO_HEIGHT_DELTA);
-    } catch (e) {
-      console.error("[CheckInWindow] resize failed:", e);
-    }
-  }
-
   function toggleMemoCollapsed() {
     const next = !memoCollapsed;
     setMemoCollapsed(next);
@@ -99,7 +80,6 @@ function CheckInWindow() {
     } catch (e) {
       console.error("[CheckInWindow] memo collapse preference save failed:", e);
     }
-    resizeMemoWindow(next);
   }
 
   useEffect(() => {
@@ -129,7 +109,7 @@ function CheckInWindow() {
         setNewTask("");
         setMemo(task ? memos[task] ?? "" : "");
         setMemoDirty(false);
-        setShowNewTaskInput(d.active_task === null);
+        setShowNewTaskInput(options.length === 0);
         setExpandedTask(selectedOption?.kind === "subitem" ? selectedOption.parentValue ?? null : null);
       } catch (e) {
         console.error("[CheckInWindow] get_checkin_data error:", e);
@@ -183,22 +163,6 @@ function CheckInWindow() {
       unlisteners.forEach((unlisten) => unlisten());
     };
   }, []);
-
-  useEffect(() => {
-    if (data?.mode !== "working") return;
-    if (!memoCollapsed || initialCollapsedResizeAppliedRef.current) return;
-    initialCollapsedResizeAppliedRef.current = true;
-
-    async function applyInitialCollapsedHeight() {
-      try {
-        await offsetCheckInWindowHeight(-CHECKIN_MEMO_HEIGHT_DELTA);
-      } catch (e) {
-        console.error("[CheckInWindow] initial collapsed resize failed:", e);
-      }
-    }
-
-    applyInitialCollapsedHeight();
-  }, [data?.mode, memoCollapsed]);
 
   function applyStatus(status: CheckInStatus) {
     setData((prev) =>
@@ -281,7 +245,7 @@ function CheckInWindow() {
 
   if (data.mode === "off") {
     return (
-      <div className="checkin-window checkin-state-window">
+      <div ref={windowRef} className="checkin-window checkin-state-window">
         <div className="checkin-header">
           <p className="checkin-title">체크인 대기 중</p>
           <span className="checkin-status-pill off">퇴근 상태</span>
@@ -301,7 +265,7 @@ function CheckInWindow() {
 
   if (data.mode === "break") {
     return (
-      <div className="checkin-window checkin-state-window">
+      <div ref={windowRef} className="checkin-window checkin-state-window">
         <div className="checkin-header">
           <p className="checkin-title">휴식 중</p>
           <span className="checkin-status-pill break">체크인 일시 중지</span>
@@ -341,7 +305,7 @@ function CheckInWindow() {
     : "비어 있음";
 
   return (
-    <div className="checkin-window">
+    <div ref={windowRef} className="checkin-window">
       <div className="checkin-header">
         <p className="checkin-title">지금 뭐 하고 있어?</p>
         <span className="checkin-status-pill working">근무 중</span>
