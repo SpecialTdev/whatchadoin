@@ -13,6 +13,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use core_shared::{Event, EventKind, TaskContext};
 use rusqlite::{params, Connection};
 
+mod screen_time;
+pub use screen_time::screen_is_active;
 mod window;
 pub use window::{FocusEvent, WindowTracker};
 
@@ -45,6 +47,7 @@ impl ExportPrivacyLevel {
 /// 수집 파이프라인 핸들. tauri-main이 생성해 tauri state로 관리한다.
 pub struct Collector {
     conn: Connection,
+    active_usage: Option<screen_time::ActiveUsage>,
     /// 프런트가 마지막으로 push한 note (가장 최신).
     latest: Option<String>,
     /// 직전 poll 시점의 note 스냅샷 (diff 기준점).
@@ -70,8 +73,10 @@ impl Collector {
         {
             conn.execute("ALTER TABLE events ADD COLUMN task_context TEXT", [])?;
         }
+        conn.execute_batch(screen_time::SCHEMA)?;
         Ok(Self {
             conn,
+            active_usage: None,
             latest: None,
             prev: None,
         })
@@ -296,6 +301,13 @@ fn apply_export_privacy(
             conn,
             &tables,
             is_window_name_column,
+            "window",
+            &mut window_aliases,
+        )?;
+        redact_named_columns(
+            conn,
+            &tables,
+            |name| name == "app_name",
             "window",
             &mut window_aliases,
         )?;
