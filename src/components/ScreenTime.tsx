@@ -21,6 +21,7 @@ export default function ScreenTime({ usage }: { usage: ReturnType<typeof useScre
       <h2>스크린타임</h2>
       {total === 0 ? <p className="hint">{message}</p> : (
         <>
+          {usage.estimated && <p className="hint">창 전환 기반 추정치 · 5분을 넘는 전환 간격 제외</p>}
           <p className="screen-time-total">{formatUsage(total)}</p>
           <ul className="screen-time-apps">
             {usage.apps.map(({ app, ms }) => (

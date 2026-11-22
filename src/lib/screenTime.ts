@@ -13,6 +13,7 @@ interface ScreenTime {
   apps: { app: string; ms: number }[];
   active: ActiveUsage | null;
   supported: boolean;
+  estimated: boolean;
 }
 
 const SAMPLE_MS = 2_000;
@@ -114,6 +115,7 @@ export function useScreenTime(enabled: boolean, date: string, boundaryHour: numb
 
   return {
     dates,
+    estimated: value?.estimated ?? false,
     status: value === undefined ? "loading" : value === null ? "error" : value.supported ? "ready" : "unsupported",
     apps: [...apps].map(([app, ms]) => ({ app, ms })).sort((a, b) => b.ms - a.ms),
   } as const;
