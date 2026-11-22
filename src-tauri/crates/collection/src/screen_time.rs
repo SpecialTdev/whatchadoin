@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
+
 use super::{now_millis, Collector};
 use rusqlite::params;
 use serde_json::{json, Value};
 
 const MAX_SAMPLE_GAP_MS: i64 = 5_000;
+const MAX_LEGACY_GAP_MS: i64 = 300_000;
 const CHECKPOINT_MS: i64 = 30_000;
 
 pub(super) struct ActiveUsage {
@@ -17,7 +20,8 @@ pub(super) const SCHEMA: &str = "
         start_ms INTEGER PRIMARY KEY,
         end_ms INTEGER NOT NULL,
         app_name TEXT NOT NULL
-    );";
+    );
+    CREATE INDEX IF NOT EXISTS screen_time_window_events ON events(ts, id) WHERE kind = 'window';";
 
 impl Collector {
     pub fn observe_screen_time(&mut self, app: Option<&str>) -> rusqlite::Result<Value> {
@@ -83,14 +87,64 @@ impl Collector {
                 Ok(json!({ "app": row.get::<_, String>(0)?, "ms": row.get::<_, i64>(1)? }))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(
-            json!({ "apps": apps, "active": self.active_payload(), "supported": screen_time_supported() }),
-        )
+        let active_overlaps = self
+            .active_usage
+            .as_ref()
+            .is_some_and(|usage| usage.start < end && usage.observed.saturating_add(2_000) > start);
+        let estimated = apps.is_empty() && !active_overlaps;
+        let apps = if estimated {
+            self.estimate_screen_time(start, end)?
+        } else {
+            apps
+        };
+        Ok(json!({
+            "estimated": estimated && !apps.is_empty(),
+            "apps": apps,
+            "active": self.active_payload(),
+            "supported": screen_time_supported()
+        }))
+    }
+
+    fn estimate_screen_time(&self, start: i64, end: i64) -> rusqlite::Result<Vec<Value>> {
+        let mut query = self.conn.prepare(
+            "SELECT ts, text FROM events
+             WHERE kind = 'window' AND ts BETWEEN ?1 AND ?2
+             ORDER BY ts, id",
+        )?;
+        let mut rows = query.query(params![
+            start.saturating_sub(MAX_LEGACY_GAP_MS),
+            end.saturating_add(MAX_LEGACY_GAP_MS),
+        ])?;
+        let mut previous: Option<(i64, String)> = None;
+        let mut totals = BTreeMap::<String, i64>::new();
+        while let Some(row) = rows.next()? {
+            let ts: i64 = row.get(0)?;
+            let text: String = row.get(1)?;
+            let Some(app) = legacy_app(&text) else {
+                previous = None;
+                continue;
+            };
+            if let Some((prior_ts, prior_app)) = previous.replace((ts, app.to_owned())) {
+                let gap = ts - prior_ts;
+                let overlap = ts.min(end) - prior_ts.max(start);
+                if (1..=MAX_LEGACY_GAP_MS).contains(&gap) && overlap > 0 {
+                    *totals.entry(prior_app).or_default() += overlap;
+                }
+            }
+        }
+        Ok(totals
+            .into_iter()
+            .map(|(app, ms)| json!({ "app": app, "ms": ms }))
+            .collect())
     }
 
     pub fn screen_time_dates(&self) -> rusqlite::Result<Vec<(i64, i64)>> {
         let mut query = self.conn.prepare(
-            "SELECT MIN(start_ms), MAX(end_ms) FROM screen_usage GROUP BY start_ms / 86400000",
+            "SELECT MIN(start_ms), MAX(end_ms) FROM screen_usage GROUP BY start_ms / 86400000
+             UNION ALL
+             SELECT MIN(ts), MAX(ts) + 1 FROM events
+             WHERE kind = 'window' AND text LIKE '포커스 전환 - %'
+             GROUP BY ts / 86400000",
         )?;
         let mut ranges = query
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -100,6 +154,20 @@ impl Collector {
         }
         Ok(ranges)
     }
+}
+
+fn legacy_app(text: &str) -> Option<&str> {
+    let event = text.strip_prefix("포커스 전환 - ")?;
+    let app = if let Some((app, _)) = event.split_once(" — \"") {
+        app
+    } else if let Some((app, pid)) = event.rsplit_once(" (PID ") {
+        pid.strip_suffix(')')?.parse::<u64>().ok()?;
+        app
+    } else {
+        return None;
+    };
+    let app = app.trim();
+    (!app.is_empty()).then_some(app)
 }
 
 pub fn screen_time_supported() -> bool {
@@ -206,6 +274,47 @@ pub fn screen_is_active() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn estimates_only_bounded_legacy_intervals_when_measured_usage_is_absent() {
+        let mut collector = Collector::open(std::path::Path::new(":memory:")).unwrap();
+        for (ts, text) in [
+            (1_000, "포커스 전환 - Editor (PID 7)"),
+            (5_000, "포커스 전환 - Browser — \"Tab\""),
+            (1_000_000, "포커스 전환 - Terminal (PID 8)"),
+        ] {
+            collector
+                .conn
+                .execute(
+                    "INSERT INTO events (ts, kind, text) VALUES (?1, 'window', ?2)",
+                    params![ts, text],
+                )
+                .unwrap();
+        }
+
+        let estimate = collector.screen_time(2_000, 2_000_000).unwrap();
+        assert_eq!(estimate["estimated"], true);
+        assert_eq!(estimate["apps"], json!([{ "app": "Editor", "ms": 3000 }]));
+        assert_eq!(
+            collector.screen_time_dates().unwrap(),
+            vec![(1000, 1_000_001)]
+        );
+        assert_eq!(
+            collector.screen_time(1_000_000, 2_000_000).unwrap()["estimated"],
+            false
+        );
+
+        collector.observe_usage(Some("Measured"), 10_000).unwrap();
+        assert_eq!(
+            collector.screen_time(2_000, 2_000_000).unwrap()["estimated"],
+            false
+        );
+        collector.observe_usage(Some("Measured"), 12_000).unwrap();
+        collector.observe_usage(None, 14_000).unwrap();
+        let measured = collector.screen_time(2_000, 2_000_000).unwrap();
+        assert_eq!(measured["estimated"], false);
+        assert_eq!(measured["apps"], json!([{ "app": "Measured", "ms": 2000 }]));
+    }
 
     #[test]
     fn clips_days_and_excludes_unobserved_gaps_without_double_counting_checkpoints() {
