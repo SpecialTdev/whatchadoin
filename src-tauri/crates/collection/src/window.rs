@@ -27,6 +27,11 @@ impl WindowTracker {
     /// 현재 포커스 윈도우를 조회해, 직전과 달라졌을 때만 이벤트를 돌려준다.
     /// 조회 실패(포커스 가능한 윈도우 없음 등)는 "변화 없음"으로 간주한다.
     pub fn poll(&mut self) -> Option<FocusEvent> {
+        let sample = Self::sample();
+        self.track(sample.as_ref())
+    }
+
+    pub fn sample() -> Option<FocusEvent> {
         // macOS: NSWorkspace가 돌려주는 autorelease 객체가 장수 스레드에서 새지
         // 않도록 매 폴링을 autorelease 풀로 감싼다.
         #[cfg(target_os = "macos")]
@@ -41,16 +46,21 @@ impl WindowTracker {
         }
         let title = window.title.trim().to_string();
 
-        let key = focus_key(&app, &title);
-        if self.prev.as_deref() == Some(key.as_str()) {
-            return None;
-        }
-        self.prev = Some(key);
         Some(FocusEvent {
             app,
             title,
             pid: window.process_id,
         })
+    }
+
+    pub fn track(&mut self, sample: Option<&FocusEvent>) -> Option<FocusEvent> {
+        let sample = sample?;
+        let key = focus_key(&sample.app, &sample.title);
+        if self.prev.as_deref() == Some(key.as_str()) {
+            return None;
+        }
+        self.prev = Some(key);
+        Some(sample.clone())
     }
 }
 

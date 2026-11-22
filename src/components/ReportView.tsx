@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent } from "react";
 import {
   checkInMemoPoints,
   type CheckInMemoPoint,
@@ -8,6 +8,7 @@ import { calendarDate, formatTime, type TrackedEvent } from "../lib/events";
 import { renderMarkdown } from "../lib/markdown";
 
 interface Props {
+  screenTime?: ReactNode;
   date: string;
   events: TrackedEvent[]; // 선택한 업무일의 이벤트 (시간 오름차순)
   checkinIntervalSec: number; // 집중 구간 캡 추정에 사용 (체크인 주기)
@@ -100,7 +101,7 @@ function memoAtTime(
   return selected;
 }
 
-function ReportView({ date, events, checkinIntervalSec }: Props) {
+function ReportView({ date, events, checkinIntervalSec, screenTime }: Props) {
   const [memoPopup, setMemoPopup] = useState<MemoPopup | null>(null);
   const [reportNote, setReportNote] = useState("");
   const [reportNoteStatus, setReportNoteStatus] = useState<
@@ -213,6 +214,7 @@ function ReportView({ date, events, checkinIntervalSec }: Props) {
             노트를 수정하거나 체크인에 응답하면 이벤트가 쌓입니다.
           </p>
         </div>
+        {date && screenTime}
         {date && reportNoteSection}
       </div>
     );
@@ -391,6 +393,7 @@ function ReportView({ date, events, checkinIntervalSec }: Props) {
         </div>
       </section>
 
+      {screenTime}
       {reportNoteSection}
 
       {memoPopup && (

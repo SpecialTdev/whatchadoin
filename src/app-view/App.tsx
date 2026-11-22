@@ -7,6 +7,8 @@ import type {
 import LeftSidebar from "../components/LeftSidebar";
 import RightSidebar from "../components/RightSidebar";
 import WorkView from "../components/WorkView";
+import ScreenTime from "../components/ScreenTime";
+import { useScreenTime } from "../lib/screenTime";
 import ReportView from "../components/ReportView";
 import SettingsView from "../components/SettingsView";
 import {
@@ -684,13 +686,15 @@ function App() {
   }, [tab]);
 
   // 이벤트에서 업무일 목록을 도출 (최신순). 하루 경계 설정을 반영.
+  const usage = useScreenTime(tab === "report", selectedDate, dayBoundaryHour);
   const reportDates = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set(usage.dates);
+    set.add(workDayKey(Date.now(), dayBoundaryHour));
     for (const ev of reportEvents) {
       if (isReportEvent(ev)) set.add(workDayKey(ev.ts, dayBoundaryHour));
     }
     return Array.from(set).sort().reverse();
-  }, [reportEvents, dayBoundaryHour]);
+  }, [reportEvents, dayBoundaryHour, usage.dates]);
 
   // 선택 날짜가 목록에 없으면 가장 최근 업무일로 맞춘다.
   useEffect(() => {
@@ -844,6 +848,7 @@ function App() {
             date={selectedDate}
             events={reportDayEvents}
             checkinIntervalSec={intervalSec}
+            screenTime={<ScreenTime usage={usage} />}
           />
         ) : (
           <SettingsView

@@ -557,6 +557,30 @@ fn update_note(collector: tauri::State<'_, Mutex<collection::Collector>>, note: 
     collector.lock().unwrap().update_note(note);
 }
 
+#[tauri::command]
+fn get_screen_time(
+    collector: tauri::State<'_, Mutex<collection::Collector>>,
+    start: i64,
+    end: i64,
+) -> Result<serde_json::Value, String> {
+    collector
+        .lock()
+        .unwrap()
+        .screen_time(start, end)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_screen_time_dates(
+    collector: tauri::State<'_, Mutex<collection::Collector>>,
+) -> Result<Vec<(i64, i64)>, String> {
+    collector
+        .lock()
+        .unwrap()
+        .screen_time_dates()
+        .map_err(|error| error.to_string())
+}
+
 /// 저장된 이벤트를 최신순으로 반환한다. limit이 있으면 페이지 단위로 반환한다.
 #[tauri::command]
 fn get_events(
@@ -781,7 +805,20 @@ pub fn run() {
             std::thread::spawn(move || {
                 let mut tracker = collection::WindowTracker::default();
                 loop {
-                    if let Some(focus_event) = tracker.poll() {
+                    let sample = collection::WindowTracker::sample();
+                    let active_app = sample
+                        .as_ref()
+                        .filter(|_| collection::screen_is_active())
+                        .map(|event| event.app.as_str());
+                    let usage = {
+                        let state = focus_handle.state::<Mutex<collection::Collector>>();
+                        let result = state.lock().unwrap().observe_screen_time(active_app);
+                        result
+                    };
+                    if let Ok(usage) = usage {
+                        let _ = focus_handle.emit_to("main", "screen-time://sample", usage);
+                    }
+                    if let Some(focus_event) = tracker.track(sample.as_ref()) {
                         println!("[Rust] focus changed → {}", focus_event.text());
                         let event = {
                             let state = focus_handle.state::<Mutex<collection::Collector>>();
@@ -847,6 +884,8 @@ pub fn run() {
             direct_input,
             update_note,
             get_events,
+            get_screen_time,
+            get_screen_time_dates,
             export_events_db,
             get_widgets,
             save_widgets,
@@ -861,6 +900,10 @@ pub fn run() {
             // 종료 직전(트레이 '종료', Cmd+Q, dock 종료 등 모든 경로) 최신 노트를 저장한다.
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
                 persist_note(app_handle);
+                if matches!(event, tauri::RunEvent::Exit) {
+                    let state = app_handle.state::<Mutex<collection::Collector>>();
+                    let _ = state.lock().unwrap().observe_screen_time(None);
+                }
             }
         });
 }
