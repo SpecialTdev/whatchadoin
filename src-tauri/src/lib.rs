@@ -269,7 +269,6 @@ fn build_checkin_window(app: &AppHandle) -> tauri::Result<()> {
     let win = WebviewWindowBuilder::new(app, "checkin", WebviewUrl::App(Default::default()))
         .title("지금 뭐 하고 있어?")
         .inner_size(760.0, 560.0)
-        .min_inner_size(520.0, 320.0)
         .center()
         .always_on_top(true)
         .resizable(true)
@@ -284,6 +283,52 @@ fn build_checkin_window(app: &AppHandle) -> tauri::Result<()> {
         }
     });
     Ok(())
+}
+
+#[tauri::command]
+async fn fit_checkin_window(
+    window: tauri::WebviewWindow,
+    width: f64,
+    height: f64,
+) -> Result<Option<serde_json::Value>, String> {
+    if window.label() != "checkin" || !width.is_finite() || !height.is_finite() {
+        return Ok(None);
+    }
+
+    let fit = || -> tauri::Result<Option<serde_json::Value>> {
+        if window.is_maximized()? {
+            return Ok(None);
+        }
+        let Some(monitor) = window.current_monitor()?.or(window.primary_monitor()?) else {
+            return Ok(None);
+        };
+        let work = monitor.work_area();
+        let scale = window.scale_factor()?;
+        let inner = window.inner_size()?;
+        let outer = window.outer_size()?;
+        let frame_width = outer.width.saturating_sub(inner.width);
+        let frame_height = outer.height.saturating_sub(inner.height);
+        let max_width = work.size.width.saturating_sub(frame_width).max(1);
+        let max_height = work.size.height.saturating_sub(frame_height).max(1);
+        let width = ((width.max(1.0) * scale).round() as u32).min(max_width);
+        let height = ((height.max(1.0) * scale).round() as u32).min(max_height);
+
+        if inner.width != width || inner.height != height {
+            window.set_size(tauri::PhysicalSize::new(width, height))?;
+        }
+        let pos = window.outer_position()?;
+        let right = work.position.x + max_width.saturating_sub(width) as i32;
+        let bottom = work.position.y + max_height.saturating_sub(height) as i32;
+        let x = pos.x.clamp(work.position.x, right);
+        let y = pos.y.clamp(work.position.y, bottom);
+        if x != pos.x || y != pos.y {
+            window.set_position(tauri::PhysicalPosition::new(x, y))?;
+        }
+        Ok(Some(
+            serde_json::json!({ "width": width as f64 / scale, "height": height as f64 / scale }),
+        ))
+    };
+    fit().map_err(|error| error.to_string())
 }
 
 fn send_checkin_notification(app: &AppHandle) {
@@ -875,6 +920,7 @@ pub fn run() {
             open_checkin,
             update_checkin_context,
             get_checkin_data,
+            fit_checkin_window,
             get_checkin_status,
             clock_in,
             clock_out,
