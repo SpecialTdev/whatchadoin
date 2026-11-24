@@ -29,6 +29,7 @@ impl Collector {
     }
 
     fn observe_usage(&mut self, app: Option<&str>, now: i64) -> rusqlite::Result<Value> {
+        let app = app.filter(|name| !is_windows_lock_screen(name));
         let mut changed = false;
         if let Some(active) = self.active_usage.as_mut() {
             let gap = now - active.observed;
@@ -84,9 +85,13 @@ impl Collector {
         )?;
         let apps = query
             .query_map(params![start, end, active_start], |row| {
-                Ok(json!({ "app": row.get::<_, String>(0)?, "ms": row.get::<_, i64>(1)? }))
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
             })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|(app, _)| !is_windows_lock_screen(app))
+            .map(|(app, ms)| json!({ "app": app, "ms": ms }))
+            .collect::<Vec<_>>();
         let active_overlaps = self
             .active_usage
             .as_ref()
@@ -124,12 +129,16 @@ impl Collector {
                 previous = None;
                 continue;
             };
-            if let Some((prior_ts, prior_app)) = previous.replace((ts, app.to_owned())) {
+            if let Some((prior_ts, prior_app)) = previous.take() {
                 let gap = ts - prior_ts;
                 let overlap = ts.min(end) - prior_ts.max(start);
                 if (1..=MAX_LEGACY_GAP_MS).contains(&gap) && overlap > 0 {
                     *totals.entry(prior_app).or_default() += overlap;
                 }
+            }
+            // A lock event can end a preceding interval, but never starts one.
+            if !is_windows_lock_screen(app) {
+                previous = Some((ts, app.to_owned()));
             }
         }
         Ok(totals
@@ -154,6 +163,11 @@ impl Collector {
         }
         Ok(ranges)
     }
+}
+
+fn is_windows_lock_screen(app: &str) -> bool {
+    let name = app.trim().rsplit(['/', '\\']).next().unwrap_or_default();
+    name.eq_ignore_ascii_case("LockApp.exe") || name.eq_ignore_ascii_case("LockApp")
 }
 
 fn legacy_app(text: &str) -> Option<&str> {
@@ -274,6 +288,52 @@ pub fn screen_is_active() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lock_screen_is_excluded_from_live_saved_and_estimated_usage() {
+        let mut collector = Collector::open(std::path::Path::new(":memory:")).unwrap();
+        collector.observe_usage(Some("Editor.exe"), 1_000).unwrap();
+        collector.observe_usage(Some("Editor.exe"), 3_000).unwrap();
+        let locked = collector
+            .observe_usage(Some(r"C:\Windows\SystemApps\LOCKAPP.EXE"), 5_000)
+            .unwrap();
+        assert_eq!(locked["active"], Value::Null);
+        collector.observe_usage(Some("Browser.exe"), 7_000).unwrap();
+        collector.observe_usage(Some("Browser.exe"), 9_000).unwrap();
+        collector.observe_usage(None, 11_000).unwrap();
+        collector
+            .conn
+            .execute(
+                "INSERT INTO screen_usage VALUES (5000, 7000, 'LockApp.exe')",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            collector.screen_time(0, 12_000).unwrap()["apps"],
+            json!([
+                { "app": "Browser.exe", "ms": 2000 },
+                { "app": "Editor.exe", "ms": 2000 }
+            ])
+        );
+
+        for (ts, text) in [
+            (20_000, "포커스 전환 - Editor.exe (PID 7)"),
+            (22_000, "포커스 전환 - LockApp.exe (PID 9)"),
+            (28_000, "포커스 전환 - Browser.exe (PID 8)"),
+        ] {
+            collector
+                .conn
+                .execute(
+                    "INSERT INTO events (ts, kind, text) VALUES (?1, 'window', ?2)",
+                    params![ts, text],
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            collector.screen_time(20_000, 30_000).unwrap()["apps"],
+            json!([{ "app": "Editor.exe", "ms": 2000 }])
+        );
+    }
 
     #[test]
     fn estimates_only_bounded_legacy_intervals_when_measured_usage_is_absent() {
